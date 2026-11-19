@@ -1,0 +1,10 @@
+/AGENTS.md
+/build/
+/build-*/
+/.cache/
+/.vscode/
+/renders/tmp/
+/renders/preview/
+/tmp/
+*.log
+.DS_Store
