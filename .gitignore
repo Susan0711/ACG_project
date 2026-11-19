@@ -8,3 +8,7 @@
 /tmp/
 *.log
 .DS_Store
+
+# Python helper caches
+__pycache__/
+*.py[cod]

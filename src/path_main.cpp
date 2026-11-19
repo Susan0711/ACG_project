@@ -1,4 +1,5 @@
 #include "render.h"
+#include "scenes/catalog.h"
 #include <charconv>
 #include <chrono>
 #include <filesystem>
@@ -26,7 +27,9 @@ int main(int argc,char** argv) {try {
             return value;
         };
         for(int i=1;i<argc;++i){std::string key=argv[i];
-            if(key=="--help"){std::cout<<"path_tracer --scene cornell|point|forest|forest-gray|forest-v03|forest-v03-gray|forest-v03-detail|texture|dof|motion|alpha-zero|alpha-half|alpha-one|alpha-double|alpha-pattern|sampling --width N --height N --spp N --seed N --depth N --accel bvh|linear --direct on|off --lens-radius R --focus-distance D --shutter-open T --shutter-close T --mode bsdf|nee|mis --environment FILE --env-rotation DEGREES --env-intensity S --exposure S --linear-output FILE --threads N --resource-root DIR --output PATH\n";
+            if(key=="--help"){std::cout<<"path_tracer --scene ";
+                write_scene_names(std::cout);
+                std::cout<<" --width N --height N --spp N --seed N --depth N --accel bvh|linear --direct on|off --lens-radius R --focus-distance D --shutter-open T --shutter-close T --mode bsdf|nee|mis --environment FILE --env-rotation DEGREES --env-intensity S --exposure S --linear-output FILE --threads N --resource-root DIR --output PATH\n";
                 return 0;
             }if(++i==argc)throw std::runtime_error("Missing value: "+key);
             std::string value=argv[i];
@@ -61,27 +64,12 @@ int main(int argc,char** argv) {try {
             }else throw std::runtime_error("Unknown option: "+key);
         }
         if(width<1||height<1||spp<1||depth<1||threads<1)throw std::runtime_error("Dimensions, spp, depth and threads must be positive");
-        if(scene!="cornell"&&scene!="point"&&scene!="forest"&&scene!="forest-gray"&&scene!="texture"&&scene!="dof"&&scene!="motion"&&scene!="alpha-zero"&&scene!="alpha-half"&&scene!="alpha-one"&&scene!="alpha-double"&&scene!="alpha-pattern"&&scene!="forest-v03"&&scene!="forest-v03-gray"&&scene!="forest-v03-detail"&&scene!="sampling")throw std::runtime_error("Unknown scene");
+        (void)find_scene(scene);
         if(std::filesystem::exists(output))throw std::runtime_error("Output already exists: "+output);
         if(intensity<0 || exposure<=0) throw std::runtime_error("Environment intensity must be nonnegative, exposure positive");
         if(!linear_output.empty() && (linear_output==output || std::filesystem::exists(linear_output))) throw std::runtime_error("Linear output exists or equals display output");
         auto start=std::chrono::steady_clock::now();
-        World world;
-        if(scene=="forest" || scene=="forest-gray") world=make_forest(scene=="forest-gray",resource_root,false);
-        if(scene=="cornell" || scene=="point") world=make_world(scene=="point",false);
-        if(scene=="texture") {
-        world=World{};
-        auto texture=std::make_shared<Texture>();
-        texture->load(asset_path(resource_root,"wood.ppm"));
-        world.materials.push_back({Kind::diffuse,{1,1,1},1.5,texture});
-        world.scene.objects.push_back(Triangle{{-1,-1,0},{1,-1,0},{1,1,0},0,{0,0},{1,0},{1,1}});
-        world.scene.objects.push_back(Triangle{{-1,-1,0},{1,1,0},{-1,1,0},0,{0,0},{1,1},{0,1}});
-        world.environment={1,1,1};
-        world.camera={{0,0,3},{0,0,0},40};
-    }
-    if(scene=="dof" || scene=="motion" || scene.rfind("alpha-",0)==0) world=make_effect_scene(scene,resource_root);
-    if(scene.rfind("forest-v03",0)==0) world=make_forest_v03(scene=="forest-v03-gray",resource_root,scene=="forest-v03-detail");
-    if(scene=="sampling") world=make_sampling_scene();
+        World world=create_scene(scene,resource_root);
     if(!environment_file.empty()) {
         world.hdr=std::make_shared<Environment>();
         world.hdr->load(asset_path(resource_root,environment_file));

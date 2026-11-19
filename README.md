@@ -1,4 +1,46 @@
-# ACG normal preview
+# Forest Creek Cabin — CPU Path Tracer
+
+当前 v0.5 主视觉在 v0.4 公共核心上增加独立场景：C++17 CPU 路径追踪、BVH、Lambertian/镜面/玻璃、HDR PFM 环境与 MIS、纹理/OBJ、景深/运动/alpha、确定性多线程均已有实现和 Mac 验证。主图仍明显带有低多边形风格，尚非最终画质。Windows 公共基线已交队友验证；本仓库没有 Windows 实跑结果。
+
+## 快速构建与运行
+
+Mac（Apple Silicon 本次验证）：
+```sh
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake --build build-release
+ctest --test-dir build-release --output-on-failure
+./build-release/path_tracer --scene forest-v05 --resource-root assets --environment studio-hdr.pfm --env-rotation 115 --env-intensity 1.1 --mode mis --width 640 --height 360 --spp 64 --depth 12 --seed 19 --threads 4 --output build-release/forest-v05-new.ppm
+```
+Intel Mac 可省略 arm64 参数并使用独立构建目录。输出已存在会报错，请选新文件名。资源根目录指向 assets；从 build 目录运行时传 `--resource-root ../assets`。
+
+Windows / MSVC（待实际验证）：
+```powershell
+cmake -S . -B build-msvc -G "Visual Studio 17 2022" -A x64
+cmake --build build-msvc --config Release
+ctest --test-dir build-msvc -C Release --output-on-failure
+.\build-msvc\Release\path_tracer.exe --scene forest-v05 --resource-root assets --environment studio-hdr.pfm --env-rotation 115 --env-intensity 1.1 --mode mis --width 160 --height 90 --spp 8 --depth 12 --seed 19 --threads 4 --output build-msvc/forest-v05-new.ppm
+```
+
+`forest-v05-gray` 使用主镜头灰模，`forest-v05-detail` 检查小屋/水岸；原 forest、forest-v03 及 normal_preview 保留。v0.5 仅改场景与注册，核心接口不变。无新第三方库/资产。
+
+## 验证与交接入口
+
+- [当前实际架构与添加场景步骤](docs/ARCHITECTURE.md)、[本轮重构验证](docs/SCENE_DECOUPLING_VALIDATION.md)
+
+- [基础功能展示包 quick/full 与现场顺序](docs/DEMO_GUIDE.md)：`tools/demo_pack.py`，标准库、独立输出目录及 manifest
+- [Midterm 素材提纲](docs/MIDTERM_OUTLINE.md)：两页 SIGGRAPH 写作准备，尚非正式报告
+
+- [本轮视觉、命令与耗时](docs/V05_VALIDATION.md)
+- [HDR/MIS 数值验证](docs/V04_VALIDATION.md)
+- [基础项核对表](docs/REQUIREMENTS_STATUS.md)、[规划](docs/PROJECT_PLAN.md)、[素材来源](docs/ASSET_SOURCES.md)
+- [Windows 验证步骤](docs/WINDOWS_VALIDATION.md)、`tools/validate_windows.ps1`
+- 历次证据：[v0](docs/V0_VALIDATION.md)、[v0.1](docs/V01_VALIDATION.md)、[v0.2](docs/V02_VALIDATION.md)、[v0.3](docs/V03_VALIDATION.md)
+
+## 历史版本说明与接口参考
+
+以下按实现时间保留；“未实现”等描述仅反映当时阶段，不代表当前能力。当前状态以上文和最新验证记录为准。
+
+### 最初的 normal_preview 阶段
 
 最小 C++17/CMake 命令行示例，无第三方依赖。生成针孔相机射线，与球体及双面三角形求交，将世界空间几何外法线按 `(n + 1) / 2` 映射为 RGB，输出 ASCII PPM（P3）。这不是路径追踪器；未实现材质、BVH、外部模型或正式场景。
 
