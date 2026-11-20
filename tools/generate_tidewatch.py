@@ -351,7 +351,8 @@ def assemble():
         place(part,boat,mat,velocity)
     place("wake",boat,"foam",velocity)
 
-    return {"camera":{"position":[6.45,4.42,10.9],"target":[0,1.88,.25],"fov_degrees":39,
+    return {"film":{"width":640,"height":360},
+            "camera":{"position":[6.45,4.42,10.9],"target":[0,1.88,.25],"fov_degrees":39,
                       "lens_radius":.018,"focus_distance":12.5,"shutter_open":0,"shutter_close":.45},
             "materials":materials,"objects":objects,
             "lights":[{"type":"area","origin":[-6,8,3],"u":[3,0,0],"v":[0,0,3],"radiance":[22,15,8.5]},
@@ -375,7 +376,8 @@ def main():
     material_lines = [f"    {json.dumps(name)}: {json.dumps(value)}" for name,value in scene["materials"].items()]
     object_lines = ["    " + json.dumps(obj) for obj in scene["objects"]]
     light_lines = ["    " + json.dumps(light) for light in scene["lights"]]
-    lines = ["{", '  "camera": ' + json.dumps(scene["camera"]) + ",", '  "materials": {',
+    lines = ["{", '  "film": ' + json.dumps(scene["film"]) + ",",
+             '  "camera": ' + json.dumps(scene["camera"]) + ",", '  "materials": {',
              ",\n".join(material_lines), "  },", '  "objects": [', ",\n".join(object_lines),
              "  ],", '  "lights": [', ",\n".join(light_lines), "  ]", "}"]
     write_text(SCENE, "\n".join(lines))

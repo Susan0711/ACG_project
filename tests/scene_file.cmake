@@ -8,7 +8,7 @@ file(REMOVE "${work}/path.ppm")
 
 execute_process(COMMAND "${TRACER}" --scene forest.json WORKING_DIRECTORY "${work}"
   RESULT_VARIABLE status OUTPUT_VARIABLE log ERROR_VARIABLE error)
-if(NOT status STREQUAL "0" OR NOT log MATCHES "Loaded scene/forest.json \\(primitives=8, materials=1\\)[\r\n]+Prepared RenderScene and Film \\(256x256\\)[\r\n]+Rendered 65536 pixels \\(64 samples/pixel, threads=1\\)[\r\n]+Wrote path.ppm")
+if(NOT status STREQUAL "0" OR NOT log MATCHES "Loaded scene/forest.json \\(primitives=8, materials=1\\)[\r\n]+Prepared RenderScene and Film \\(256x256\\)[\r\n]+Rendered 65536 pixels \\(64 samples/pixel, threads=1\\)[\r\n]+render_seconds=[0-9]+[.][0-9]+[\r\n]+Wrote path.ppm")
   message(FATAL_ERROR "Scene render failed: ${log}${error}")
 endif()
 
@@ -36,5 +36,50 @@ foreach(invalid IN ITEMS 0 -1 257 1.5 4x)
     RESULT_VARIABLE status ERROR_VARIABLE error)
   if(status STREQUAL "0" OR NOT error MATCHES "Usage:")
     message(FATAL_ERROR "Expected invalid --threads ${invalid} to fail during argument parsing")
+  endif()
+endforeach()
+
+# Write a small scene with a film block, keeping forest.json as the legacy case.
+file(READ "${work}/scene/forest.json" forest)
+function(set_film fields)
+  string(REGEX REPLACE "^[{]" "{\"film\":{${fields}}," configured "${forest}")
+  file(WRITE "${work}/scene/sized.json" "${configured}")
+endfunction()
+
+function(check_film width height spp)
+  file(REMOVE "${work}/path.ppm")
+  execute_process(COMMAND "${TRACER}" --scene sized.json ${ARGN} WORKING_DIRECTORY "${work}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE log ERROR_VARIABLE error)
+  if(NOT status STREQUAL "0" OR NOT log MATCHES "\\(${spp} samples/pixel,")
+    message(FATAL_ERROR "Film render failed: ${log}${error}")
+  endif()
+  file(STRINGS "${work}/path.ppm" header LIMIT_COUNT 3)
+  if(NOT header STREQUAL "P3;${width} ${height};255")
+    message(FATAL_ERROR "Unexpected film size: ${header}")
+  endif()
+endfunction()
+
+set_film("\"width\":19,\"height\":11")
+check_film(19 11 64)
+check_film(7 11 2 --width 7 --spp 2)
+check_film(19 5 1 --height 5 --spp 1)
+check_film(23 9 3 --width 23 --height 9 --spp 3)
+set_film("\"width\":8")
+check_film(8 256 1 --spp 1)
+
+foreach(value IN ITEMS 0 -2 2.5 16385 "\"3\"" true 18446744073709551615)
+  set_film("\"width\":${value}")
+  execute_process(COMMAND "${TRACER}" --scene sized.json WORKING_DIRECTORY "${work}"
+    RESULT_VARIABLE status ERROR_VARIABLE error)
+  if(status STREQUAL "0" OR NOT error MATCHES "film[.]width")
+    message(FATAL_ERROR "Expected invalid width ${value} to fail during scene loading")
+  endif()
+endforeach()
+
+foreach(args IN ITEMS "--width;0" "--height;16385" "--spp;-1" "--spp;1.5" "--spp;2147483648" "--width;1;--width;2")
+  execute_process(COMMAND "${TRACER}" --scene forest.json ${args} WORKING_DIRECTORY "${work}"
+    RESULT_VARIABLE status ERROR_VARIABLE error)
+  if(status STREQUAL "0" OR NOT error MATCHES "Usage:")
+    message(FATAL_ERROR "Expected invalid arguments to fail: ${args}")
   endif()
 endforeach()

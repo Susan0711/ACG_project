@@ -11,6 +11,16 @@
 namespace {
 using Json = nlohmann::json;
 
+int film_dimension(const Json& entry, const char* key, int fallback) {
+    const auto it = entry.find(key);
+    if (it == entry.end()) return fallback;
+    if (!it->is_number_integer() || *it < 1 || *it > FilmSize::max_dimension) {
+        throw std::runtime_error(std::string("film.") + key + " must be an integer in [1, " +
+                                 std::to_string(FilmSize::max_dimension) + "]");
+    }
+    return it->get<int>();
+}
+
 Camera read_camera(const Json& entry) {
     json_fields::expect_fields(entry, {"position", "target", "fov_degrees", "lens_radius",
                                       "focus_distance", "shutter_open", "shutter_close"});
@@ -54,9 +64,15 @@ World load_scene_file(const std::filesystem::path& path) {
     std::ifstream input(path);
     if (!input) throw std::runtime_error("Cannot open scene file: " + path.u8string());
     const Json scene = Json::parse(input);
-    json_fields::expect_fields(scene, {"camera", "materials", "objects", "lights"});
+    json_fields::expect_fields(scene, {"camera", "materials", "objects", "lights", "film"});
 
     World world;
+    if (scene.contains("film")) {
+        const Json& film = scene.at("film");
+        json_fields::expect_fields(film, {"width", "height"});
+        world.film_size.width = film_dimension(film, "width", world.film_size.width);
+        world.film_size.height = film_dimension(film, "height", world.film_size.height);
+    }
     world.camera = read_camera(scene.at("camera"));
 
     std::map<std::string, int> material_ids;

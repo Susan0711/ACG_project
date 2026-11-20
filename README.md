@@ -37,7 +37,18 @@ cmake --build build-local --target path_tracer --parallel
 | 命令行参数 | 用法 |
 | --- | --- |
 | `--scene <文件>` | 必填。从项目根目录运行时，`--scene forest.json` 会查找 `scene/forest.json`。带目录的路径按原样打开，JSON 内的网格和贴图路径始终相对于该 JSON 所在目录。 |
+| `--width <像素>`、`--height <像素>` | 可选，每项为 1–16384 的整数。按轴覆盖场景的 `film.width`、`film.height`。若场景和命令行都省略某一轴，该轴取 256。 |
+| `--spp <整数>` | 可选，每像素路径样本数，正整数，默认 64。相同尺寸下，提高 spp 会增加计算量，通常能降低采样噪声。 |
 | `--threads <整数>` | 可选，范围 1–256，默认 1。线程分担图块，每个像素仍取相同数量的样本。 |
+
+以潮汐观测站为例，在上述运行命令中将文件名换成 `tidewatch.json`。以下两档均使用同一机位、16:9 画幅和默认随机种子。分辨率会参与相机射线计算，固定垂直视场角时，加宽画幅会扩大水平视野。
+
+| 用途 | JSON 中的 film | 运行参数 | 实际采样 |
+| --- | --- | --- | --- |
+| 预览 | `{"width": 640, "height": 360}` | `--spp 16 --threads 12` | 640 × 360，每像素 16 次 |
+| 1080p 成图 | 同上 | `--width 1920 --height 1080 --spp 128 --threads 12` | 1920 × 1080，每像素 128 次 |
+
+日志中的 `render_seconds` 是 `render()` 的实际耗时（秒），从开始分配图块到所有工作线程结束。场景及贴图加载、BVH 构建、画布分配和 PPM 写盘都在这个计时区间之外。
 
 ## 场景设置
 
@@ -58,10 +69,13 @@ cmake --build build-local --target path_tracer --parallel
 
 ### JSON 字段层次
 
-场景的四个顶层字段均必填。`materials` 按名称定义材质，`objects` 和 `lights` 是数组，每项分别放置一个模型或一盏灯。树中按 `type` 展开可选类型。写 JSON 时，所选类型的参数和 `type` 写在同一个对象里。网格和贴图的相对路径都从场景 JSON 所在目录起算。
+`camera`、`materials`、`objects` 和 `lights` 为必填字段，`film` 可选。`materials` 按名称定义材质，`objects` 和 `lights` 是数组，每项分别放置一个模型或一盏灯。树中按 `type` 展开可选类型。写 JSON 时，所选类型的参数和 `type` 写在同一个对象里。网格和贴图的相对路径都从场景 JSON 所在目录起算。
 
 ```text
 场景
+├── film                            可选，场景默认画幅
+│   ├── width                       可选，像素宽度，整数 1–16384，默认 256
+│   └── height                      可选，像素高度，整数 1–16384，默认 256
 ├── camera                          相机，位置与注视点均为世界坐标
 │   ├── position                    相机位置 [x, y, z]
 │   ├── target                      注视点 [x, y, z]
@@ -117,23 +131,24 @@ OBJ 使用三角面。`v` 存顶点位置，`vt` 存二维纹理坐标，`vn` �
 
 ```text
 main(argc, argv)
-├── parse_arguments(...)           → 场景路径和 RenderSettings
+├── parse_arguments(...)           → 场景路径和本次运行的覆盖参数
 ├── load_scene_file(path)          → World，包含相机、图元、材质和光源
 ├── RenderScene(std::move(world))  → 可供所有线程查询的场景，含 BVH
-├── Film(256, 256)                 → 存放线性 RGB 的像素数组
+├── Film(width, height)            → 以最终宽高分配线性 RGB 像素数组
 ├── render(scene, film, settings)  → 填满 film.pixels，等待所有工作线程结束
 └── film.write("path.ppm")         → 在当前工作目录写出 P3 PPM
 ```
 
 ### 1. 命令行参数与场景路径解析
 
-`main()` 先构造默认的 `RenderSettings`。`parse_arguments()` 逐对读取选项和值，把 `--scene` 存入路径，把 `--threads 4` 存入 `settings.threads`。回到 `main()` 后，单独的文件名会补上 `scene/` 前缀。上面构建示例传入的 `../scene/forest.json` 已经含有目录，可以直接交给加载器。每像素采样数 64、最大反弹深度 16、随机种子 1 和默认的直接光采样模式 NEE 均来自 `RenderSettings`。[参数解析](src/main.cpp) · [默认设置](src/render/render.h)
+`parse_arguments()` 逐对读取命令行选项。`main()` 将指定的 `spp` 和线程数应用到 `RenderSettings`，给单独的场景文件名补上 `scene/` 前缀。加载 JSON 后再逐轴确定画布尺寸，优先级为命令行、场景 `film`、默认尺寸。最大反弹深度 16、随机种子 1 和默认的直接光采样模式 NEE 均来自 `RenderSettings`。[参数解析](src/main.cpp) · [默认设置](src/render/render.h)
 
 ### 2. `World` 对象的构建
 
 ```text
 load_scene_file(path)
 ├── Json::parse() → json_fields::expect_fields()   解析 JSON，检查顶层字段
+├── film_dimension()                               若存在 film，校验并读取场景宽高
 ├── read_camera() → Camera::validate()             读取并校验视点、朝向、视场角
 ├── read_material()                                构造 stone 漫反射材质
 │   └── read_texture() → Texture::load()           读取 rock.ppm，将颜色解码为线性 RGB
@@ -148,7 +163,7 @@ load_scene_file(path)
 
 `RenderScene` 的构造函数接管 `World`，按相机快门区间调用一次 `BVH::build()`。`bounds()` 先计算每个三角形在该区间内的包围盒，局部函数 `build_range` 合并当前组的包围盒，再由 `split_median()` 沿最长轴按盒中心排序、从中间分组，递归到每个叶节点只存一个图元索引。稍后每条射线查询的都是这棵树。[场景构造](src/render_scene.cpp) · [BVH 建树与遍历](src/acceleration/bvh.cpp)
 
-接下来 `main()` 创建 `Film(256, 256)`。此时画布有 65,536 个像素位置。场景和画布通过引用传入 `render()`，后者负责计算并填写像素。[Film 定义](src/render/film.h)
+接下来 `main()` 按已解析的宽高创建 `Film`。例如 `forest.json` 省略了 `film`，按默认参数运行时画布为 256 × 256，共 65,536 个像素。场景和画布通过引用传入 `render()`，后者负责计算并填写像素。[Film 定义](src/render/film.h)
 
 ### 4. 工作线程的图块分配与像素采样
 
@@ -157,11 +172,11 @@ render(scene, film, settings)
 ├── 启动 settings.threads 个线程，执行局部函数 worker
 │   ├── next.fetch_add(1) 领取一个 16 × 16 图块，逐行遍历其中的像素
 │   └── 对每个像素 (x, y)
-│       ├── 循环 64 次，每次都依次完成下面三步
+│       ├── 循环 settings.spp 次，每次都依次完成下面三步
 │       │   ├── Sampler::next() 两次，在像素内随机取样得到 (u, v)
 │       │   ├── Camera::sample(u, v, ...) → Camera::generate() → Ray
 │       │   └── integrate(scene, ray, ...) → 将这一条路径的线性 RGB 加进 sum
-│       └── film.pixels[y * width + x] = sum / 64
+│       └── film.pixels[y * width + x] = sum / settings.spp
 └── join() 等待所有工作线程结束，返回 main()
 ```
 
