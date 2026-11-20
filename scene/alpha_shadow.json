@@ -1,0 +1,15 @@
+{
+  "camera": { "position": [1.4, 3.4, 4.3], "target": [0, 0.25, 0], "fov_degrees": 42 },
+  "materials": {
+    "leaf": { "type": "diffuse", "color": [0.12, 0.48, 0.08], "opacity_map": "../assets/leaf-opacity.ppm" },
+    "ground": { "type": "diffuse", "color": [0.7, 0.67, 0.57] }
+  },
+  "objects": [
+    { "mesh": "../assets/quad.obj", "material": "leaf", "position": [-0.5, 0.8, 0] },
+    { "mesh": "../assets/quad.obj", "material": "ground", "position": [-1, 0, -1] },
+    { "mesh": "../assets/quad.obj", "material": "ground", "position": [-1, 0, 1] },
+    { "mesh": "../assets/quad.obj", "material": "ground", "position": [1, 0, -1] },
+    { "mesh": "../assets/quad.obj", "material": "ground", "position": [1, 0, 1] }
+  ],
+  "lights": [{ "type": "point", "position": [-3, 3.4, -1.8], "intensity": [68, 68, 68] }]
+}

@@ -1,4 +1,7 @@
-#include "render.h"
+#include "render/direct_lighting.h"
+#include "render/render.h"
+#include "scenes/factories.h"
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 void check(bool condition,const char* label) { if(!condition) throw std::runtime_error(label); }
@@ -41,57 +44,64 @@ int main() {
         for(int i=0;i<32;++i) check(std::abs(counts[i]/50000.0-varied.probabilities[i])<.006,"luminance solid-angle histogram");
         check(power_heuristic(2,3)+power_heuristic(3,2)==1,"MIS complementary weights");
         check(power_heuristic(1,0)==1 && power_heuristic(0,1)==0,"zero competing PDF");
-        World w;w.hdr=std::make_shared<Environment>();w.hdr->width=8;w.hdr->height=4;
-        w.hdr->pixels.assign(32,{2,2,2});w.hdr->prepare();
-        w.materials={{Kind::mirror,{1,1,1},1.5}};w.scene.objects.push_back(Sphere{{0,0,0},1,0});w.bvh.build(w.scene);
+        World w;
+        auto constant = std::make_shared<Environment>();
+        constant->width=8; constant->height=4;
+        constant->pixels.assign(32,{2,2,2}); constant->prepare();
+        w.lights.hdr=constant;
+        w.materials={{Kind::mirror,{1,1,1},1.5}};w.scene.objects.push_back(Sphere{{0,0,0},1,0});RenderScene mirror(w);
         for(auto mode:{SamplingMode::bsdf,SamplingMode::nee,SamplingMode::mis}) {
-            Sampler r{1};auto value=integrate(w,{{0,0,3},{0,0,-1}},r,4,true,true,mode);
+            Sampler r{1};auto value=integrate(mirror,{{0,0,3},{0,0,-1}},r,4,mode);
             check(value.x==2,"delta mirror environment full weight");
-            value=integrate(w,{{0,0,3},{0,1,0}},r,4,true,true,mode);
+            value=integrate(mirror,{{0,0,3},{0,1,0}},r,4,mode);
             check(value.x==2,"primary environment full weight");
         }
         w.materials[0].kind=Kind::glass;
+        RenderScene glass(w);
         Sampler glass_rng{4};
-        auto glass_mis=integrate(w,{{0,0,3},{0,0,-1}},glass_rng,16,true,true,SamplingMode::mis);
+        auto glass_mis=integrate(glass,{{0,0,3},{0,0,-1}},glass_rng,16,SamplingMode::mis);
         Sampler glass_bsdf_rng{4};
-        auto glass_bsdf=integrate(w,{{0,0,3},{0,0,-1}},glass_bsdf_rng,16,true,true,SamplingMode::bsdf);
+        auto glass_bsdf=integrate(glass,{{0,0,3},{0,0,-1}},glass_bsdf_rng,16,SamplingMode::bsdf);
         check(finite(glass_mis) && glass_mis.x>0 && glass_mis.x==glass_bsdf.x,"delta glass keeps full environment weight");
         World plane;
-        plane.hdr=w.hdr;
+        plane.lights.hdr=w.lights.hdr;
         plane.materials={{Kind::diffuse,{.6,.6,.6},1.5}};
         plane.scene.objects.push_back(Triangle{{-100,-100,0},{100,-100,0},{0,100,0},0});
-        plane.bvh.build(plane.scene);
+        RenderScene diffuse(plane);
         for(auto mode:{SamplingMode::bsdf,SamplingMode::nee,SamplingMode::mis}) {
             Sampler r{75};double total=0;
-            for(int i=0;i<30000;++i) total+=integrate(plane,{{0,0,1},{0,0,-1}},r,1,true,true,mode).x;
+            for(int i=0;i<30000;++i) total+=integrate(diffuse,{{0,0,1},{0,0,-1}},r,1,mode).x;
             check(std::abs(total/30000-1.2)<.025,"constant HDR diffuse energy across modes");
         }
         World points=plane;
-        points.hdr.reset();
-        points.points={{{0,0,2},{4,4,4}},{{0,0,2},{4,4,4}}};
+        points.lights.hdr.reset();
+        points.lights.points={{{0,0,2},{4,4,4}},{{0,0,2},{4,4,4}}};
+        RenderScene point_scene(points);
         Sampler point_rng{9};
-        auto point_value=integrate(points,{{0,0,1},{0,0,-1}},point_rng,1,true,true,SamplingMode::mis);
+        auto point_value=integrate(point_scene,{{0,0,1},{0,0,-1}},point_rng,1,SamplingMode::mis);
         check(std::abs(point_value.x-1.2/pi)<1e-12,"two delta lights enumerated with probability one");
-        auto point_bsdf=integrate(points,{{0,0,1},{0,0,-1}},point_rng,1,true,true,SamplingMode::bsdf);
+        auto point_bsdf=integrate(point_scene,{{0,0,1},{0,0,-1}},point_rng,1,SamplingMode::bsdf);
         check(point_bsdf.x==0,"pure BSDF cannot hit point light");
         World unregistered;
         unregistered.materials={{Kind::diffuse,{1,1,1},1.5},{Kind::emissive,{2,2,2},1.5}};
         unregistered.scene.objects.push_back(Sphere{{0,0,0},1,0});
         unregistered.scene.objects.push_back(Triangle{{-100,-100,3},{0,100,3},{100,-100,3},1});
-        unregistered.bvh.build(unregistered.scene);
+        RenderScene emitter(unregistered);
         Sampler nr{1},mr{1};
         double ns=0,ms=0;
         for(int i=0;i<1000;++i) {
-            ns+=integrate(unregistered,{{0,0,2},{0,0,-1}},nr,3,true,true,SamplingMode::nee).x;
-            ms+=integrate(unregistered,{{0,0,2},{0,0,-1}},mr,3,true,true,SamplingMode::mis).x;
+            ns+=integrate(emitter,{{0,0,2},{0,0,-1}},nr,3,SamplingMode::nee).x;
+            ms+=integrate(emitter,{{0,0,2},{0,0,-1}},mr,3,SamplingMode::mis).x;
         }
         check(ns==ms && ms>1000,"unregistered emitter keeps MIS hit contribution");
-        w=make_sampling_scene();w.hdr=std::make_shared<Environment>();w.hdr->load("assets/studio-hdr.pfm");
-        double peak=0;for(Vec3 p:w.hdr->pixels) peak=std::max(peak,p.x);
+        w=make_sampling_scene();
+        auto map=std::make_shared<Environment>(); map->load("assets/studio-hdr.pfm");
+        w.lights.hdr=map;
+        double peak=0;for(Vec3 p:map->pixels) peak=std::max(peak,p.x);
         check(peak>10,"HDR values retained above display range");
-        w.bvh.build(w.scene);
-        Film a(20,12),b(20,12);RenderSettings settings{8,8,1,9,true,true,SamplingMode::mis};
-        render(w,a,settings);settings.threads=4;render(w,b,settings);
+        RenderScene sampling(w);
+        Film a(20,12),b(20,12);RenderSettings settings{8,8,1,9,SamplingMode::mis};
+        render(sampling,a,settings);settings.threads=4;render(sampling,b,settings);
         for(std::size_t i=0;i<a.pixels.size();++i) check(a.pixels[i].x==b.pixels[i].x&&a.pixels[i].y==b.pixels[i].y&&a.pixels[i].z==b.pixels[i].z,"HDR MIS thread invariance");
         std::cout<<"PASS HDR mapping, distribution, black poles, MIS and delta/thread checks\n";
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

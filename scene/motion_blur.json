@@ -1,0 +1,11 @@
+{
+  "camera": {
+    "position": [0, 1.4, 5.5], "target": [0, 0.3, 0], "fov_degrees": 41,
+    "shutter_open": 0, "shutter_close": 1
+  },
+  "materials": { "stone": { "type": "diffuse", "texture": "../assets/rock.ppm" } },
+  "objects": [
+    { "mesh": "../assets/rock.obj", "material": "stone", "position": [-0.8, 0, 0], "velocity": [1.6, 0, 0] }
+  ],
+  "lights": [{ "type": "point", "position": [1, 3, 4], "intensity": [55, 55, 55] }]
+}

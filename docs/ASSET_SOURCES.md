@@ -1,6 +1,21 @@
 # Forest Creek Cabin — references and asset sources
 
-Links below were checked on 2026-11-19. **Reference images are for visual study only.** No external model, image, HDRI, or texture has been downloaded or approved for inclusion in this repository. For each asset actually used, add the exact downloaded variant, author, license, format, edits, polygon count, and whether redistribution is permitted.
+The forest reference list dates from 2026-11-19. Reference images are for visual study only. The Tidewatch scene uses the following external assets.
+
+## Tidewatch · Kenney Castle Kit 2.0
+
+Kenney created and distributed Castle Kit 2.0 under CC0 1.0 Universal, which allows adapting and redistributing the models and their color atlas. The archive used here is the release posted by Kenney on OpenGameArt. [Kenney asset page](https://kenney.nl/assets/castle-kit) · [Author's release and ZIP](https://opengameart.org/content/castle-kit) · [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
+
+Archive SHA-256: `921f3f73927bb23106cae34bc21d5ab4b033a9fc120475e96f714a406e3169df`. The generator reads selected files from `Models/OBJ format/`, bakes each module's scale and yaw, keeps its UVs, drops repeated triangles and zero-area faces, and relies on geometric normals for flat shading. It converts Kenney's sRGB color atlas from a 512×512 PNG to a 128×128 P3 PPM. The following counts are per converted OBJ before placement. [Conversion and placement script](../tools/generate_tidewatch.py)
+
+| Kenney OBJ | Bundled OBJ in `assets/tidewatch/` | Triangles |
+| --- | --- | ---: |
+| tower-hexagon-base / tower-hexagon-mid / tower-hexagon-top / tower-hexagon-roof | beacon-base / beacon-gallery / beacon-eaves / beacon-roof | 68 / 404 / 168 / 68 |
+| tower-square-base / tower-square-mid-windows / tower-square-top-roof-high-windows | keep-base / keep-windows / keep-roof | 28 / 356 / 254 |
+| wall-doorway / wall-narrow | gate / wall-front / wall-side | 498 / 126 / 126 |
+| flag-pennant / tree-large / tree-small / rocks-large | pennant / cypress / sapling / reefs | 118 / 229 / 164 / 150 |
+
+The generator builds the island cliffs and turf, sea surface, offshore ridges, sky and sun geometry, lantern glazing and lamp, foliage cards, jetty, sailboat and wake specifically for this scene. The jetty and ivy also reuse the project's wood and leaf textures. The assembled scene and preconverted OBJ files render offline. To rebuild the conversions from the original ZIP, run `python tools/generate_tidewatch.py --castle-zip <path-to-zip>` with Pillow installed.
 
 ## Rendering references (view only; rights remain with creators)
 
@@ -38,17 +53,20 @@ Created in this repository by the Codex assistant at the user's request; no team
 
 - `assets/wood.ppm`: ASCII P3, 256×256 sRGB. Original deterministic Python generator `tools/generate_assets.py`: warped longitudinal growth lines, elliptical knot distortion, plank seams, fine pores/noise (seed 19). No source image. Used on cabin/trunks; no edits after generation.
 - `assets/rock.obj`: original 8-triangle octahedral rock, authored by the same generator. v/vt/vn and positive/negative index examples. Instances use nonuniform scaling and Y rotation; flat shading.
+- The rock now has a UV layout on all eight faces. Its JSON material uses `assets/rock.ppm`, a 256 × 256 sRGB P3 color map produced with the built-in ImageGen tool and converted to the renderer's input format. Generation prompt: “灰绿色溪石的可平铺正方形漫反射贴图。正交俯视，岩石表面铺满画面，哑光细颗粒、几条细且不规则的浅灰石英脉，均匀无阴影、无高光，无物体轮廓、文字和边框。”
 - `assets/test_colors.ppm`: original 2×2 hand-authored sRGB test pattern for orientation/transfer-function checks.
-- Cabin, terrain, creek and trees: original procedural geometry in `src/forest.cpp`; no external model/texture rights required.
+- Cabin, terrain, creek and trees: original procedural geometry in `tests/scenes/forest.cpp`; no external model/texture rights required.
 - `assets/index_cases.obj` and `assets/invalid_quad.obj`: original hand-authored parser fixtures by Codex; the latter intentionally contains an unsupported quad. No external source/license dependency.
 
 ## v0.2 original opacity asset
+
+The JSON alpha-shadow example reuses [quad.obj](../assets/quad.obj) for the leaf and the ground tiles. This square was authored in the project with four vertices, two triangles and one full UV tile.
 
 `assets/leaf-opacity.ppm` — created by Codex assistant in this repository at the user's request; no external URL/source or third-party license restriction. 128×128 ASCII P3, linear binary opacity (not sRGB). `tools/generate_opacity.py` constructs four rotated elliptical leaf outlines with narrow vein holes and a diagonal stem. No source photograph and no teammate authorship claimed. Project owner controls distribution; no new project-wide license asserted. Used solely in the controlled alpha-pattern scene; no forest vegetation upgrade.
 
 ## v0.3 original scene geometry
 
-`src/forest_v03.cpp` is original procedural geometry authored by Codex in this repository under the user's direction; no external asset URL or third-party content. No teammate participation is asserted. Existing original wood.ppm is reused without editing. Project owner controls distribution; no additional license granted here.
+`tests/scenes/forest_v03.cpp` is original procedural geometry authored by Codex in this repository under the user's direction; no external asset URL or third-party content. No teammate participation is asserted. Existing original wood.ppm is reused without editing. Project owner controls distribution; no additional license granted here.
 
 Methods: shared sinusoidal channel cross sections and connected bank strips; slab/box cabin construction with omitted front wall regions for actual window holes, inset rectangular lamps, framing and board seams; tapered seven-sided branch cylinders; three irregular layered crown profiles with deterministic position/scale/phase variation; flattened three-ring nine-sided boulders with irregular heights; sparse opaque triangular grass clusters. Seed 7003 fixes scene generation. 11,162 triangles plus one spherical door handle in the current main/detail/gray geometry. Trees/rocks are generated directly, while original forest retains the OBJ import demonstration. No downloaded resource added.
 
@@ -58,6 +76,6 @@ Methods: shared sinusoidal channel cross sections and connected bank strips; sla
 
 ## v0.5 original scene and quieter timber
 
-`src/forest_v05.cpp/.h`: scene-only adaptation of original forest_v03 authored by Codex under user direction; no teammate contribution inferred. Uses asymmetric branch/foliage fans, clustered trees and shore boulders, patch-selected grass, per-board gable mapping. No external assets or licenses introduced.
+`tests/scenes/forest_v05.cpp`: scene-only adaptation of original forest_v03 authored by Codex under user direction; no teammate contribution inferred. Uses asymmetric branch/foliage fans, clustered trees and shore boulders, patch-selected grass, per-board gable mapping. No external assets or licenses introduced.
 
 `assets/wood-soft-v05.ppm`: 256×256 ASCII P3 sRGB, derived from retained original wood.ppm by tools/generate_wood_v05.py. Channel contrast compressed to 25% around weathered cedar base (108,83,59); original file unchanged. UV repeats increase on scene geometry and gable is mapped per narrow board, reducing oversized grain. No photo source or URL; owner controls redistribution, no new license grant asserted. Existing studio-hdr.pfm reused unchanged.

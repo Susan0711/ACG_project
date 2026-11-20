@@ -1,192 +1,244 @@
-# Forest Creek Cabin — CPU Path Tracer
+# ACG Track 1 · CPU 路径追踪器
 
-当前 v0.5 主视觉在 v0.4 公共核心上增加独立场景：C++17 CPU 路径追踪、BVH、Lambertian/镜面/玻璃、HDR PFM 环境与 MIS、纹理/OBJ、景深/运动/alpha、确定性多线程均已有实现和 Mac 验证。主图仍明显带有低多边形风格，尚非最终画质。Windows 公共基线已交队友验证；本仓库没有 Windows 实跑结果。
+这是一个用 C++17 编写的离线渲染器。给定相机、三角网格、材质和光源，程序从相机穿过每个像素发出射线，追踪光在场景中的反射与折射，估计到达相机的光，再写成 PPM 图像。
 
-## 快速构建与运行
+**渲染流程**　读取 JSON、OBJ 和贴图 → 装配 `World` → 建立包围盒层次结构（BVH）→ 逐像素采样并追踪光路 → 对线性 RGB 取平均 → 写出 `path.ppm`。
 
-Mac（Apple Silicon 本次验证）：
-```sh
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build build-release
-ctest --test-dir build-release --output-on-failure
-./build-release/path_tracer --scene forest-v05 --resource-root assets --environment studio-hdr.pfm --env-rotation 115 --env-intensity 1.1 --mode mis --width 640 --height 360 --spp 64 --depth 12 --seed 19 --threads 4 --output build-release/forest-v05-new.ppm
-```
-Intel Mac 可省略 arm64 参数并使用独立构建目录。输出已存在会报错，请选新文件名。资源根目录指向 assets；从 build 目录运行时传 `--resource-root ../assets`。
+## 构建与运行
 
-Windows / MSVC（待实际验证）：
-```powershell
-cmake -S . -B build-msvc -G "Visual Studio 17 2022" -A x64
-cmake --build build-msvc --config Release
-ctest --test-dir build-msvc -C Release --output-on-failure
-.\build-msvc\Release\path_tracer.exe --scene forest-v05 --resource-root assets --environment studio-hdr.pfm --env-rotation 115 --env-intensity 1.1 --mode mis --width 160 --height 90 --spp 8 --depth 12 --seed 19 --threads 4 --output build-msvc/forest-v05-new.ppm
-```
+从含有 `CMakeLists.txt`、`scene/` 和 `assets/` 的项目根目录开始。以下两套命令都构建 Release 版本，并用四个 CPU 线程运行同一份 `forest.json`。构建需要 CMake 3.16 或更高版本，以及支持 C++17 的编译器。JSON 解析库已随仓库提供。
 
-`forest-v05-gray` 使用主镜头灰模，`forest-v05-detail` 检查小屋/水岸；原 forest、forest-v03 及 normal_preview 保留。v0.5 仅改场景与注册，核心接口不变。无新第三方库/资产。
+首次从源码运行时，`cmake -S . -B build-local` 根据项目配置生成构建文件，`cmake --build` 编译并链接出 `path_tracer`。之后只改 JSON、OBJ 或贴图时，直接用已有的可执行文件重新渲染即可。改了 C++ 源码再执行构建命令。
 
-## 验证与交接入口
+### Windows · PowerShell
 
-- [当前实际架构与添加场景步骤](docs/ARCHITECTURE.md)、[本轮重构验证](docs/SCENE_DECOUPLING_VALIDATION.md)
-
-- [基础功能展示包 quick/full 与现场顺序](docs/DEMO_GUIDE.md)：`tools/demo_pack.py`，标准库、独立输出目录及 manifest
-- [Midterm 素材提纲](docs/MIDTERM_OUTLINE.md)：两页 SIGGRAPH 写作准备，尚非正式报告
-
-- [本轮视觉、命令与耗时](docs/V05_VALIDATION.md)
-- [HDR/MIS 数值验证](docs/V04_VALIDATION.md)
-- [基础项核对表](docs/REQUIREMENTS_STATUS.md)、[规划](docs/PROJECT_PLAN.md)、[素材来源](docs/ASSET_SOURCES.md)
-- [Windows 验证步骤](docs/WINDOWS_VALIDATION.md)、`tools/validate_windows.ps1`
-- 历次证据：[v0](docs/V0_VALIDATION.md)、[v0.1](docs/V01_VALIDATION.md)、[v0.2](docs/V02_VALIDATION.md)、[v0.3](docs/V03_VALIDATION.md)
-
-## 历史版本说明与接口参考
-
-以下按实现时间保留；“未实现”等描述仅反映当时阶段，不代表当前能力。当前状态以上文和最新验证记录为准。
-
-### 最初的 normal_preview 阶段
-
-最小 C++17/CMake 命令行示例，无第三方依赖。生成针孔相机射线，与球体及双面三角形求交，将世界空间几何外法线按 `(n + 1) / 2` 映射为 RGB，输出 ASCII PPM（P3）。这不是路径追踪器；未实现材质、BVH、外部模型或正式场景。
-
-`--scene single`（默认）保留原单球；`--scene multi` 包含前后遮挡的两个球和两个三角形，其中前方三角形背面朝向相机，显示黄色。
-
-```sh
-ctest --test-dir build --output-on-failure
-./build/normal_preview --scene multi --width 320 --height 180 --output build/multi.ppm
-```
-
-Windows 测试命令：`ctest --test-dir build-msvc -C Release --output-on-failure`。
-
-共享接口在 `src/geometry.h`，实现位于 `src/geometry.cpp`：`Sphere`、`Triangle`、`Scene` 均提供 `intersect(ray, t_min, t_max, hit)`，使用闭区间，失败不改变 hit。Scene 线性返回最近命中，等距时保留首个物体。Ray 为 `origin + t * direction`，方向无需单位化，只有单位方向时 t 才是距离；输入应为有限数值，零方向不命中。球半径须为正。三角形外法线由顶点绕序 `(b-a) × (c-a)` 决定；退化及近平行射线不命中。零向量归一化返回零。
-
-HitRecord 保存 `t`、`position`、`outward_normal`（单位几何外法线）、`normal`（朝入射侧）、`front_face`（方向与外法线点积小于零）及仅作标识的 `material_id`。预览只使用 outward_normal，不隐藏正反面。相机和图像缓冲暂留 main.cpp。
-
-## macOS
-
-在仓库根目录运行（需要 CMake 和 Apple Clang）：
-
-```sh
-cmake -S . -B build
-cmake --build build
-./build/normal_preview --width 320 --height 180 --output build/normal.ppm
-```
-
-## Windows / MSVC
-
-在安装了 CMake、Visual Studio 2022 C++ 工具的终端中，从仓库根目录运行：
+将 CMake 和 MinGW-w64 的 `g++`、`mingw32-make` 加入 PATH 后运行以下命令。
 
 ```powershell
-cmake -S . -B build-msvc -G "Visual Studio 17 2022" -A x64
-cmake --build build-msvc --config Release
-.\build-msvc\Release\normal_preview.exe --width 320 --height 180 --output build-msvc/normal.ppm
+cmake -S . -B build-local -G "MinGW Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release
+cmake --build build-local --target path_tracer --parallel
+Push-Location build-local
+.\path_tracer.exe --scene ..\scene\forest.json --threads 4
+Pop-Location
 ```
 
-Windows 命令尚未实际验证。
+### macOS · 终端
 
-参数默认值：`--width 640 --height 360 --output normal.ppm`；支持 `--help`。宽高为 1–8192 的整数。输出目录必须存在；为保护已有文件，输出文件存在时会报错，请选择新文件名。相对路径以运行时工作目录为基准。
-
-`Ray` 保存原点和方向；`Camera` 按像素中心生成射线（垂直视场角 90°）；`Image` 保存 RGB 缓冲并写文件。右手坐标系，Y 向上，相机朝 -Z，图像从上到下排列。球心 `(0,0,-2)`，半径 `0.75`；背景为深灰。法线颜色直接量化，不作 gamma 变换。每像素一条射线，尚无抗锯齿。
-
-
-## CPU Path Tracer v0
-
-单线程 C++17，无运行时第三方依赖。原 `normal_preview` 命令及颜色规则保留；新增 `path_tracer`：
+首次配置可用 `xcode-select --install` 安装 Apple 命令行工具，安装完成后继续。已使用 Homebrew 的机器可用 `brew install cmake` 安装 CMake。[Apple 命令行工具](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools/) · [Homebrew 的 CMake 配方](https://formulae.brew.sh/formula/cmake)
 
 ```sh
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
-cmake --build build-release
-ctest --test-dir build-release --output-on-failure
-./build-release/path_tracer --scene cornell --width 256 --height 256 --spp 128 --seed 1 --depth 16 --accel bvh --direct on --output build-release/cornell-new.ppm
-./build-release/path_tracer --scene point --width 256 --height 256 --spp 64 --output build-release/point-new.ppm
+cmake -S . -B build-local -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release
+cmake --build build-local --target path_tracer --parallel
+(cd build-local && ./path_tracer --scene ../scene/forest.json --threads 4)
 ```
 
-Windows（未实际验证）：
-```powershell
-cmake -S . -B build-msvc -G "Visual Studio 17 2022" -A x64
-cmake --build build-msvc --config Release
-ctest --test-dir build-msvc -C Release --output-on-failure
-.\build-msvc\Release\path_tracer.exe --scene cornell --width 256 --height 256 --spp 128 --seed 1 --depth 16 --accel bvh --direct on --output build-msvc/cornell-new.ppm
+程序把 `path.ppm` 写入**运行时的工作目录**，所以上述命令的输出位置都是 `build-local/path.ppm`。再次运行前，先给该文件改名或换一个空目录。写入器遇到同名文件会报错并保留原文件。
+
+| 命令行参数 | 用法 |
+| --- | --- |
+| `--scene <文件>` | 必填。从项目根目录运行时，`--scene forest.json` 会查找 `scene/forest.json`。带目录的路径按原样打开，JSON 内的网格和贴图路径始终相对于该 JSON 所在目录。 |
+| `--threads <整数>` | 可选，范围 1–256，默认 1。线程分担图块，每个像素仍取相同数量的样本。 |
+
+## 场景设置
+
+[forest.json](scene/forest.json) 是最小示例。它在原点放置一块石头，给它指定一份带颜色贴图的漫反射材质，再放置一盏点光源。下面是完整输入。
+
+```json
+{
+  "camera": { "position": [0, 1, 4], "target": [0, 0.3, 0], "fov_degrees": 40 },
+  "materials": { "stone": { "type": "diffuse", "texture": "../assets/rock.ppm" } },
+  "objects": [
+    { "mesh": "../assets/rock.obj", "position": [0, 0, 0], "material": "stone" }
+  ],
+  "lights": [
+    { "type": "point", "position": [2, 3, 4], "intensity": [40, 40, 40] }
+  ]
+}
 ```
 
-默认参数为 cornell、256×256、64 spp、seed 1、depth 16、bvh、direct on、path.ppm。支持 `--accel linear` 和 `--direct off`；点光是 delta 光源，纯 BSDF 模式无法击中它，因此点光场景关闭直接采样会变黑。尺寸限制 1–8192，spp 1–10000000，depth 1–1024，seed 为 uint64（可为零）。现有输出文件拒绝覆盖。程序输出实际耗时与显示转换前全图 RGB 均值。
+### JSON 字段层次
 
-核心实现：`geometry.*` 保存几何接口；`tracer.h` 声明 Camera/Film/Sampler、Material/BSDFSample、Lights、BVH/World 和积分入口；`tracer.cpp` 实现采样与积分；`bvh.cpp` 实现最长轴质心中分二叉 BVH；`scenes.cpp` 创建内置场景；`path_main.cpp` 负责 CLI。修改 World.scene 后须重新 build BVH。
+场景的四个顶层字段均必填。`materials` 按名称定义材质，`objects` 和 `lights` 是数组，每项分别放置一个模型或一盏灯。树中按 `type` 展开可选类型。写 JSON 时，所选类型的参数和 `type` 写在同一个对象里。网格和贴图的相对路径都从场景 JSON 所在目录起算。
 
-- BSDFSample.direction 为单位出射方向；weight 为 `f * abs(cos) / pdf`；漫反射 PDF 为立体角密度 `cos/pi`，weight=albedo。delta 标记镜面/玻璃；其 pdf 是离散分支概率，不能当作普通立体角密度。理想玻璃使用精确非偏振 Fresnel，空气/玻璃界面，透射 radiance 权重含 `(eta_i/eta_t)^2`，全反射必选反射。不支持嵌套介质栈。
-- 反射/透射按出射方向与几何外法线点积选择偏移侧，固定偏移 1e-5 适用于当前单位尺度。相机支持 origin/target/fov，Y 向上；当前内置配置避免视线与 up 平行。
-- 点光 intensity 按距离平方衰减；矩形均匀面积采样的立体角 PDF 为 `distance²/(area*cos_light)`，单面发光。每个灯各采一次，不需要光源选择概率。阴影射线把包括玻璃在内的几何视为遮挡，折射连接由路径采样完成，不做透明直线阴影近似。
-- 直接采样开启时，只有相机首段和上一事件为 delta 时累计击中灯面的发光；漫反射后的直接发光由灯光采样估计。所有内置发光面均登记为 AreaLight；扩展场景时必须保持此约定。关闭时累计全部灯面命中。没有 MIS。
-- 像素随机抖动、余弦半球采样、SplitMix64 固定种子；第 4 次散射起 Russian Roulette，存活概率 clamp(max throughput, .05, .95)，存活后除以该概率。最大深度会截断路径，仍有有限深度偏差。
-- Film 保存线性平均辐亮度，不逐样本裁剪；最终 exposure（接口默认 1）→Reinhard→sRGB→8 位 PPM。normal_preview 继续直接映射法线颜色。相同构建/参数可复现，不承诺跨编译器逐字节相同。
-- AABB slab 对零方向单独处理，闭区间允许接触；三角形包围盒扩张 1e-9。BVH 与线性等距命中都优先原始物体顺序。不做 SAH。
-
-测试涵盖原几何用例、10000 条 BVH/线性射线、零厚度/平行 slab、NaN 输入、余弦采样统计及 PDF、Fresnel、Snell、全反射、偏移和有限路径。v0 不含纹理、模型导入、森林场景、景深、运动模糊、alpha shadow、GUI；不能视为全部课程核心项完成。
-
-## v0.1 texture / OBJ / forest
-
-Run from the repository root so `assets/` resolves relative to the working directory. Added `--scene forest`, `forest-gray`, and `texture`. Existing commands still work. Example:
-
-```sh
-./build-release/path_tracer --scene forest --width 480 --height 270 --spp 64 --depth 10 --seed 19 --output build-release/forest-new.ppm
+```text
+场景
+├── camera                          相机，位置与注视点均为世界坐标
+│   ├── position                    相机位置 [x, y, z]
+│   ├── target                      注视点 [x, y, z]
+│   ├── fov_degrees                 垂直视场角，单位为度，0 < 值 < 179
+│   ├── lens_radius                 可选，光圈半径 ≥ 0，默认 0（针孔）
+│   ├── focus_distance              可选，沿相机前方到焦平面的距离 > 0，默认 4
+│   ├── shutter_open                可选，快门开启时刻（秒），与 shutter_close 成对填写
+│   └── shutter_close               快门关闭时刻 ≥ 开启时刻，两者省略时固定在 0 秒
+├── materials                       材质名称 → 材质定义
+│   └── <材质名>                     自定，例如 stone，可被多个物体引用
+│       ├── type                    四选一
+│       │   ├── "diffuse"           color 或 texture 二选一
+│       │   │   ├── color           常量反照率 [r, g, b]，各通道在 [0, 1] 内
+│       │   │   └── texture         颜色贴图路径（P3 PPM），按 UV 读取反照率
+│       │   ├── "mirror"            color 为镜面反射率 [r, g, b]，各通道在 [0, 1] 内
+│       │   ├── "glass"             ior 为介质折射率，必须大于 0
+│       │   └── "emissive"          color 为发射辐亮度 [r, g, b]，各通道 ≥ 0，可大于 1
+│       ├── opacity                 前三类可选，表面覆盖率在 [0, 1] 内，默认 1
+│       └── opacity_map             前三类可选，覆盖率贴图路径（P3 PPM）
+├── objects[]                       每项放置一份 OBJ，同一网格可多次摆放
+│   ├── mesh                        三角面 OBJ 路径
+│   ├── position                    0 秒时相对模型原点施加的平移 [x, y, z]
+│   ├── material                    引用 materials 中的名称，例如 "stone"
+│   └── velocity                    可选，世界坐标中的平移速度，单位为场景长度/秒，默认 [0, 0, 0]
+└── lights[]                        每项定义一盏灯
+    └── type                        二选一
+        ├── "point"                 点光源
+        │   ├── position            光源位置 [x, y, z]
+        │   └── intensity           RGB 辐射强度，各通道 ≥ 0
+        └── "area"                  单面发光的平行四边形
+            ├── origin              发光面的一个角点 [x, y, z]
+            ├── u                   从 origin 出发的第一条边向量
+            ├── v                   从 origin 出发的第二条边向量，u × v 非零并指向发光侧
+            └── radiance            正面发出的 RGB 辐亮度，各通道 ≥ 0
 ```
 
-`assets.h/.cpp` provides Texture and a transactional triangular OBJ loader. HitRecord now includes UV and light_id; triangle UVs interpolate barycentrically, sphere u uses atan2(z,x), v uses asin(y), +Y at v=1. Image textures load once: ASCII P3 only, max value 1–65535, comments accepted, sRGB decoded to linear. UV origin is bottom-left; nearest-neighbor repeat addressing (including negative UVs), integer UVs wrap. Procedural textures output linear color. Both diffuse NEE evaluation and BSDF sampling call Material::albedo with the same hit UV. `texture` renders the original wood on a UV-mapped square.
+### 材质类型与光学行为
 
-OBJ accepts v, two-component vt, vn, triangular f in v, v/vt, v//vn, v/vt/vn forms, positive and relative negative indices; o/g/s metadata are ignored. Other directives (including MTL/usemtl) and polygons error with file/line. Caller chooses material. Transform supports nonzero nonuniform scale, Y rotation in radians and translation. Normals use inverse transpose; v0.1 deliberately uses flat geometric shading, validating vn without interpolation. Geometry controls front_face and ray offsets. Imports append only after complete validation.
+1. **漫反射 `diffuse`**。`forest.json` 的石头使用 `{"type": "diffuse", "texture": "../assets/rock.ppm"}`。射线命中时，程序用该点的 UV 查出反照率，再按朗伯模型计算直接光，并在表面上方按余弦加权采样下一跳。纯色物体可以用 `color` 为整个表面给定同一个反照率。
+2. **理想镜面 `mirror`**。潮汐观测站的海面使用 `{"type": "mirror", "color": [0.27, 0.61, 0.7]}`。命中点的法线决定唯一的反射方向，`color` 决定红、绿、蓝三个通道分别保留多少反射光。水面的起伏和法线来自 OBJ，镜面材质负责沿该方向继续追踪。
+3. **理想玻璃 `glass`**。灯室玻璃使用 `{"type": "glass", "ior": 1.45}`。射线进入或离开玻璃时，程序根据入射角和界面两侧的折射率计算菲涅耳反射概率。每次命中按该概率选择反射或折射，折射方向遵循斯涅尔定律，发生全反射时只走反射方向。
+4. **自发光 `emissive`**。灯芯使用 `{"type": "emissive", "color": [9, 3.1, 0.65]}`。这里的 `color` 给出表面自身发出的光。路径击中正面就累加发光贡献，击中背面则贡献为零，两种情况都在这里终止。若希望积分器从其他表面直接向一块发光面采样，可在 `lights[]` 中定义 `area` 灯。
 
-World::add_area is the creation API for linked rectangular light geometry/material/sampling data: do not mutate its generated geometry or light independently. Hit light_id=-1 denotes emission not covered by NEE; such emission remains visible after diffuse events. This supersedes v0's rule requiring every emitter to be registered. Environment contributes only on escape multiplied by throughput. Forest uses constant cool sky plus a finite outdoor point light, two warm window area lights and a mirror creek. No HDRI, transparency foliage or fluid effects.
+材质名负责把配置和网格连起来。例如，`forest.json` 中的 `objects[0].material` 引用 `"stone"`，加载器便将这份漫反射材质绑定到 `rock.obj` 的每个三角形上。[石头场景](scene/forest.json) · [观测站材质配置](scene/tidewatch.json) · [材质参数解析](src/materials/material_reader.cpp) · [散射实现](src/materials/material.cpp) · [发光命中处理](src/render/path_integrator.cpp)
 
-Assets are original assistant-generated examples, documented in ASSET_SOURCES. Forest is a first composition preview, not the final polished course scene. Windows remains unverified. See V01_VALIDATION for actual commands and limitations.
+### 网格和贴图格式
 
-## v0.2: thin lens, shutter time, thin-surface coverage
+OBJ 使用三角面。`v` 存顶点位置，`vt` 存二维纹理坐标，`vn` 存法线。`f` 的三个面角可用 `v`、`v/vt`、`v//vn` 或 `v/vt/vn` 分别引用这些数据。三个角都有法线时，程序在命中点插值着色法线，否则使用面法线。颜色贴图使用 P3 PPM，加载时从 sRGB 转为线性 RGB。覆盖率贴图同样使用 P3，红通道直接作为线性覆盖率。[岩石网格](assets/rock.obj) · [OBJ 读取](src/io/assets.cpp) · [贴图读取](src/textures/texture.cpp)
 
-New validation scenes: `dof`, `motion`, `alpha-zero`, `alpha-half`, `alpha-one`, `alpha-double`, `alpha-pattern`. Existing scenes default to zero lens radius and instantaneous shutter at time 0. Example (run from repository root):
+## `main()` 的调用流程
 
-```sh
-./build-release/path_tracer --scene dof --width 320 --height 200 --spp 128 --depth 8 --seed 27 --lens-radius .22 --focus-distance 6 --output build-release/dof-new.ppm
-./build-release/path_tracer --scene motion --width 320 --height 200 --spp 128 --depth 8 --seed 27 --shutter-open 0 --shutter-close 1 --output build-release/motion-new.ppm
-./build-release/path_tracer --scene alpha-pattern --width 320 --height 200 --spp 128 --depth 8 --seed 27 --output build-release/alpha-new.ppm
+执行 `path_tracer` 后，程序从 `src/main.cpp` 的 `main()` 开始。下面按执行顺序列出它直接调用的函数，以及每一步交给下一步的数据。[主入口](src/main.cpp)
+
+```text
+main(argc, argv)
+├── parse_arguments(...)           → 场景路径和 RenderSettings
+├── load_scene_file(path)          → World，包含相机、图元、材质和光源
+├── RenderScene(std::move(world))  → 可供所有线程查询的场景，含 BVH
+├── Film(256, 256)                 → 存放线性 RGB 的像素数组
+├── render(scene, film, settings)  → 填满 film.pixels，等待所有工作线程结束
+└── film.write("path.ppm")         → 在当前工作目录写出 P3 PPM
 ```
 
-- `Camera::sample(u,v,aspect,rng)` adds effects to the retained pinhole `generate` interface. `--lens-radius` is aperture **radius**, in world units, not diameter/f-number. `--focus-distance` is positive axial distance to the plane perpendicular to camera forward, in world units (not optical focal length). Lens samples use `r=R*sqrt(U), theta=2*pi*V`, uniform in disk area. Zero radius uses the original pinhole ray exactly and consumes no lens random numbers. FOV (degrees), aspect, focus, finite shutter bounds, zero/parallel-up direction are validated. Camera up remains +Y.
-- `Ray::time` and `HitRecord::time` carry scene time. `--shutter-open/--shutter-close` are seconds in these examples; equal bounds give an instantaneous ray without random sampling. Camera samples time once; all subsequent spawn calls, straight transparent crossings and shadow queries retain it. Sphere center is `center + velocity*time`, with velocity in world units per second and center specified at time 0. BVH::build accepts shutter endpoints and unions both endpoint boxes; rebuild after changing shutter or motion. Query times must lie inside the build interval. Only translating spheres move; lights/camera/triangles are static.
-- Material `opacity` defaults to 1; optional `opacity_map` is multiplied with it. Load opacity P3 via `Texture::load(path, false)` to preserve **linear data**; the red channel is coverage. Color textures still decode sRGB by default. Original leaf silhouette generation is in tools/generate_opacity.py. Repeat/nearest UV addressing is the same as image color textures.
-- This is thin-surface coverage, not glass or participating media. Camera rays stochastically accept each surface with probability alpha, otherwise continue in the same direction/time without throughput scaling, bounce increment, RR, or changing previous_delta. Alpha 0/1 consumes no acceptance RNG. Shadow transmission deterministically multiplies `(1-alpha)` over intersections until escape or an opaque blocker. Two half-covered layers give 0.25. Each geometric crossing counts as a layer (closed meshes have entry and exit). Distinct layers should not be exactly coplanar.
-- Independent 4096-crossing limits throw diagnostic errors instead of silently biasing pathological transparent stacks. Camera crossings step forward 1e-7 world units (unit path directions); shadow queries advance their t lower bound with nextafter. Extremely thin/coincident geometry below numerical offset scales remains a limitation. Emitters must be fully opaque: emissive alpha throws an error. Glass still refracts and blocks straight NEE shadow connections, unchanged.
+### 1. 命令行参数与场景路径解析
 
-Implementation and test scenes live in `src/effects.cpp`, tested by `tests/effects_tests.cpp`. `tools/render_v02.py` runs the recorded comparison suite and refuses existing output paths through the CLI. Windows commands use the existing Release executable layout; Windows remains unverified. See docs/V02_VALIDATION.md for actual results and all commands.
+`main()` 先构造默认的 `RenderSettings`。`parse_arguments()` 逐对读取选项和值，把 `--scene` 存入路径，把 `--threads 4` 存入 `settings.threads`。回到 `main()` 后，单独的文件名会补上 `scene/` 前缀。上面构建示例传入的 `../scene/forest.json` 已经含有目录，可以直接交给加载器。每像素采样数 64、最大反弹深度 16、随机种子 1 和默认的直接光采样模式 NEE 均来自 `RenderSettings`。[参数解析](src/main.cpp) · [默认设置](src/render/render.h)
 
-## v0.3 scene and deterministic threads
+### 2. `World` 对象的构建
 
-Original `forest`/`forest-gray` are retained. Added `forest-v03`, `forest-v03-gray` (same main camera), `forest-v03-detail` (closer inspection camera). Default effects remain off. Example:
-
-```sh
-./build-release/path_tracer --scene forest-v03 --resource-root assets --width 640 --height 360 --spp 64 --depth 10 --seed 19 --threads 4 --output build-release/forest-v03-new.ppm
+```text
+load_scene_file(path)
+├── Json::parse() → json_fields::expect_fields()   解析 JSON，检查顶层字段
+├── read_camera() → Camera::validate()             读取并校验视点、朝向、视场角
+├── read_material()                                构造 stone 漫反射材质
+│   └── read_texture() → Texture::load()           读取 rock.ppm，将颜色解码为线性 RGB
+├── load_obj()                                     读取 rock.obj，绑定 stone 的材质编号
+│   └── Transform::point()                         将模型中的顶点变换到世界坐标
+└── add_light()                                    将这盏点光源登记到 world.lights.points
 ```
 
-`--resource-root DIR` is the **assets directory**, relative to the process working directory or an explicit user-supplied path; default `assets` preserves old commands. No machine-specific path is compiled in. A missing resource reports the exact attempted path and suggests the flag. From the build directory use `--resource-root ../assets`. Output paths remain relative to the working directory. Windows handoff: [docs/WINDOWS_VALIDATION.md](docs/WINDOWS_VALIDATION.md), or tools/validate_windows.ps1 (pending Windows execution).
+加载器先为 `stone` 分配编号 0，把材质存入 `world.materials[0]`。随后处理 JSON 的 `objects[0]`，按名字查到编号 0，把它连同 OBJ 路径和位置交给 `load_obj()`。所以一条 JSON 摆放记录导入后，对应 `world.scene.objects` 中的八个三角形，每个三角形都带有材质编号和各面角的 UV。点光源只登记位置和强度。如果场景换用面光源，`add_light()` 会调用 `World::add_area()`，再登记发光材质和两个可以被射线击中的灯面三角形。[场景装配](src/scene_init.cpp) · [材质读取](src/materials/material_reader.cpp) · [OBJ 导入](src/io/assets.cpp) · [面光源登记](src/world.cpp)
 
-`render.h` exposes `render(const World&, Film&, const RenderSettings&)`. `--threads` accepts 1–256, defaults to 1. Standard C++17 threads claim 16×16 tiles atomically; each pixel has exactly one writer and accumulates samples in increasing sample index. Independent SplitMix-style integer hashes derive the RNG state from seed, linear pixel index and sample index. Thread number/order is never part of the seed. World, BVH and loaded textures are read-only throughout rendering. Exceptions cancel future tile work, all launched threads join, and the main thread rethrows; no partial image is written. Thread-launch failures also join existing workers.
+### 3. BVH 构建与 `Film` 初始化
 
-This replaces the v0–v0.2 single global RNG stream, so old stochastic images are no longer byte-identical even with one thread. Their assets/scenes/outputs and algorithm tests remain intact; normal_preview is unchanged. Within one build/machine the new scheme is exactly invariant to thread count. No cross-platform bit-identity claim. Reporting separates scene loading, BVH build, render and write time; statistics are reduced in pixel order after workers finish. Scene factories support optional deferred BVH construction for accurate CLI timing.
+`RenderScene` 的构造函数接管 `World`，按相机快门区间调用一次 `BVH::build()`。`bounds()` 先计算每个三角形在该区间内的包围盒，局部函数 `build_range` 合并当前组的包围盒，再由 `split_median()` 沿最长轴按盒中心排序、从中间分组，递归到每个叶节点只存一个图元索引。稍后每条射线查询的都是这棵树。[场景构造](src/render_scene.cpp) · [BVH 建树与遍历](src/acceleration/bvh.cpp)
 
-The new scene uses continuous curved channel cross sections, sloping banks, irregular ring-mesh boulders, geometric window openings with inset lights, frames/door/foundation/eaves/plank joints, varied tree groups, branches, a fallen log and sparse opaque ground plants. Ground color varies slowly per patch rather than repeating UV stripes; wood UV scale follows board geometry. It remains a stylized first readable natural scene, not final quality. No MIS, SAH, HDRI, new BSDF, volumes or GUI.
+接下来 `main()` 创建 `Film(256, 256)`。此时画布有 65,536 个像素位置。场景和画布通过引用传入 `render()`，后者负责计算并填写像素。[Film 定义](src/render/film.h)
 
-Local Mac validation encountered a Rosetta/native mixed-object rebuild when CMake was launched from a differently architected Python. Recovery on the Apple M1 used `cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64` followed by build/CTest. This flag belongs to that Mac invocation only; it is not in project CMake and must not be added to the Windows commands. Prefer one architecture per build directory.
+### 4. 工作线程的图块分配与像素采样
 
-## v0.4 floating HDR and MIS
-
-```sh
-./build-release/path_tracer --scene sampling --environment studio-hdr.pfm --mode mis --width 320 --height 200 --spp 128 --depth 12 --seed 19 --threads 4 --output build-release/hdr-new.ppm --linear-output build-release/hdr-new.pfm
-./build-release/path_tracer --scene forest-v03 --environment studio-hdr.pfm --env-rotation 30 --env-intensity .7 --mode mis --width 640 --height 360 --spp 64 --depth 12 --seed 19 --threads 4 --output build-release/forest-hdr-new.ppm
+```text
+render(scene, film, settings)
+├── 启动 settings.threads 个线程，执行局部函数 worker
+│   ├── next.fetch_add(1) 领取一个 16 × 16 图块，逐行遍历其中的像素
+│   └── 对每个像素 (x, y)
+│       ├── 循环 64 次，每次都依次完成下面三步
+│       │   ├── Sampler::next() 两次，在像素内随机取样得到 (u, v)
+│       │   ├── Camera::sample(u, v, ...) → Camera::generate() → Ray
+│       │   └── integrate(scene, ray, ...) → 将这一条路径的线性 RGB 加进 sum
+│       └── film.pixels[y * width + x] = sum / 64
+└── join() 等待所有工作线程结束，返回 main()
 ```
 
-`--environment` resolves through `--resource-root` (default assets). It replaces the scene's constant escape environment but retains its existing geometry and point/window lights. `--env-rotation` is azimuth degrees, positive moving +X toward +Z; `--env-intensity` is a nonnegative linear multiplier. `--exposure` is a positive display multiplier, applied only on PPM writing. `--linear-output` optionally writes untonemapped RGB float PFM for numerical comparisons; existing files are rejected.
+`Camera::generate()` 用相机朝向、垂直视场角和画幅宽高比，把画面坐标 `(u, v)` 换成世界空间中的射线方向。`forest.json` 使用针孔和固定快门，每条相机射线从 `[0, 1, 4]` 出发，时刻为 0。其他场景如果设置了光圈或快门区间，`Camera::sample()` 还会采样镜头位置或射线时刻。每份样本的随机序列由种子、像素编号和样本编号决定，因此改变线程数只会改变由哪个线程领取图块。[线程与像素循环](src/render/render.cpp) · [相机射线](src/render/camera.cpp)
 
-HDR input is true linear **RGB PFM**, not JPEG/PNG, Radiance RGBE or EXR. Reader supports PF, width/height, signed scale (endianness and magnitude), bottom-up float32 RGB; malformed/truncated/nonfinite/negative radiance is rejected. No image library dependency was added. In-memory rows run north (+Y) to south; azimuth 0 is +X and pi/2 is +Z. Nearest texel evaluation intentionally matches the piecewise-constant importance distribution. No bilinear filtering or HDR photographic asset is claimed.
+### 5. 单条光路的积分
 
-Each cell receives probability proportional to luminance `(0.2126 R + 0.7152 G + 0.0722 B)` times its exact solid angle `Δphi*(cos(theta0)-cos(theta1))`. The latter integrates sin(theta), instead of approximating at the pixel center. A selected cell samples uniform phi and uniform cos(theta), giving solid-angle PDF `cell_probability/cell_solid_angle`; this avoids division by sin(theta) near poles. Azimuth wraps at the seam; polar rows have finite PDFs; all-black maps fall back to uniform solid-angle sampling with zero radiance. CDF and pixels load once and remain read-only across threads. Endpoint lens-independent environment samples avoid exact poles by an insignificant open-interval clamp.
+以下展开一次命中岩石、点光源位于受光侧的反弹。`integrate()` 用循环追踪同一条路径，维护两个 RGB 值。`result` 累加已经收到的光，`throughput` 记录沿途各次散射相乘的权重。[路径积分循环](src/render/path_integrator.cpp)
 
-Modes: `--mode bsdf|nee|mis` (default nee preserves the old interface). `--direct off` forces bsdf regardless of mode; `--direct on` permits the selected mode. `bsdf` hits emissive surfaces/escapes naturally; delta point lights cannot be randomly hit, so scenes containing point lights are not equivalent BSDF comparisons. `nee` samples lights and suppresses only covered diffuse-event light hits. `mis` uses power heuristic β=2 instead of suppression.
+```text
+integrate(scene, ray, ...)
+├── scene.intersect() → BVH::intersect()
+│   ├── AABB::intersect()                  淘汰射线碰不到的包围盒
+│   └── Triangle::intersect()              在候选叶节点求交，最近命中写入 HitRecord
+├── scene.material(hit) → material.alpha() 用材质编号找到 stone，检查表面覆盖率
+├── direct_lighting()                      估计石头上这个点收到的直接光
+│   └── Lighting::sample_each()
+│       ├── Lighting::sample(point, ...)    算出朝向灯的方向、距离和按距离平方衰减的光照
+│       └── 对这份光源样本执行回调
+│           ├── evaluate_bsdf()            计算石头沿这个方向的漫反射
+│           │   └── albedo() → Texture::value(hit.uv)
+│           └── scene.visibility()         用阴影射线检查命中点到灯之间的遮挡
+│               ├── spawn()                从表面稍微偏移的位置发射阴影射线
+│               └── shadow_transmittance() → scene.intersect()，逐层累乘透过率
+├── sample_bsdf()                          按材质抽取下一跳的方向和权重
+└── spawn(hit, sampled.direction)          生成下一跳射线，回到循环顶部求交
+```
 
-The implementation enumerates **every point light, every registered area light, and the HDR environment once** per diffuse vertex. Thus selection probability is 1 per technique; there is no hidden 1/N light lottery. Area PDF is distance²/(area*cos_light), environment PDF is per steradian, and Lambertian BSDF PDF is cos/pi. Light-side MIS uses p_light²/(p_light²+p_bsdf²); BSDF-side covered-emission/escape uses its complement. Emitters not registered for NEE retain full hit contribution. Main rays and previous mirror/glass delta events get weight 1; point lights have no competing continuous BSDF technique and weight 1. Depth now counts scattering events: after the last permitted scatter the next emission/escape endpoint is still evaluated, without allowing another scatter. This gives all modes the same truncated path family (including depth=1), and retains complementary MIS weights at that final scatter. The finite depth cap still biases transport relative to infinite paths.
+#### 射线求交与命中记录
 
-Previous BSDF position/PDF/delta state survives alpha crossings; shadow visibility still multiplies thin coverage, and time is propagated unchanged. RR compensation remains unchanged; weights on both sides use the same directional PDFs (without folding RR/coverage into one side only). Constant legacy environments without an HDR map remain BSDF-only and retain their full escape contribution. `src/environment.*` handles HDR, `src/integrator.cpp` holds lighting/integration, and `tests/environment_tests.cpp` checks normalization, mapping, energy, delta and thread behavior.
+`Triangle::intersect()` 用命中点的重心坐标插值 UV。最终留下的 `HitRecord` 包含最近命中的位置、法线、UV 和材质编号。若整条射线都未命中，积分器改调 `Lighting::escape()` 查询背景，计入贡献后结束这条路径。命中自发光面时则检查正反面，计入正面的发光贡献后结束。[图元求交](src/core/geometry.cpp) · [命中记录](src/core/ray.h) · [背景查询](src/lighting/lights.cpp)
 
-Reproducible validation: `python3 tools/validate_v04.py` writes new files and records exact commands, float outputs, multi-seed means/errors/times. It does not overwrite previous results. See V04_VALIDATION for reference noise and the limited observed benefit of MIS over NEE. Windows remains pending; the existing Windows entry point is retained. No SAH, Principled, normal maps, volume or GUI added.
+#### 直接光照与可见性查询
+
+相机射线确定石头表面的可见点。计算该点接收的直接光时，还需检查它与光源之间的遮挡。`evaluate_bsdf()` 用命中点的贴图反照率求出漫反射系数，`visibility()` 则向点光源发出阴影射线，只检查命中点到灯之间的线段，遇到遮挡层就将透过率乘以 `1 − α`。`direct_lighting()` 根据材质、入射光、入射角和可见性返回直接光贡献，积分器以 `result += throughput × direct` 逐通道累加。[直接光计算](src/render/direct_lighting.cpp) · [逐灯采样](src/lighting/lights.h) · [阴影查询](src/render_scene.cpp)
+
+#### 散射采样与路径终止
+
+对石头的漫反射材质，`sample_bsdf()` 按余弦加权分布抽取漫反射方向，返回的权重是该 UV 处的反照率。积分器将权重乘入 `throughput`，用 `spawn()` 生成保持原采样时刻的新射线。从第四次散射起，俄罗斯轮盘赌按路径权重决定是否继续，存活路径除以存活概率作补偿。路径结束时，`integrate()` 把 `result` 返回给第 4 步的样本循环。[材质散射](src/materials/material.cpp) · [路径积分](src/render/path_integrator.cpp)
+
+### 6. 颜色编码与 PPM 输出
+
+所有像素算完后，控制回到 `main()`，它调用 `film.write("path.ppm")`。对每个颜色通道，`Film::write()` 先应用曝光，将非负值 `x` 按 `x / (1 + x)` 压缩到显示范围，再作 sRGB 编码、量化成 0–255 的整数，依次写入 P3 文件。显示变换作用于已经平均好的像素。[写出实现](src/render/film.cpp)
+
+渲染库还提供 HDR 环境光和多重重要性采样（MIS），可从 C++ 测试查看用法。当前 JSON 可配置点光和面光，命令行沿用默认的 NEE 模式。[HDR 与 MIS 测试](tests/environment_tests.cpp)
+
+## 场景示例
+
+沿用上面的命令，将 `forest.json` 换成同目录的文件即可。也可以复制一个示例，修改相机、材质或物体摆放，再交给同一程序读取。
+
+| 场景 | 配置要点 |
+| --- | --- |
+| [depth_of_field.json](scene/depth_of_field.json) | 同一个岩石网格分别摆在近处和远处。用 `focus_distance` 指定焦平面，用 `lens_radius` 调整光圈半径，设为 0 即恢复针孔相机。 |
+| [alpha_shadow.json](scene/alpha_shadow.json) | 一张薄片通过 `opacity_map` 定义叶片覆盖率。阴影射线每穿过一层，就将透过的直接光乘以该处的 `1 − α`。 |
+| [motion_blur.json](scene/motion_blur.json) | 相机固定，快门从 0 秒开到 1 秒。石头的 `velocity` 是 `[1.6, 0, 0]`，在射线时刻 `t` 按 `position + velocity × t` 定位。 |
+| [tidewatch.json](scene/tidewatch.json) | 潮汐观测站将塔楼、码头、海面和帆船组合在一份 JSON 中。海面用带法线的波浪网格配合镜面材质，船的多个部件共用平移速度。 |
+
+## 项目结构
+
+```text
+scene/                   可直接交给 --scene 的 JSON 场景
+assets/                  OBJ 网格、颜色与覆盖率贴图、环境贴图
+src/
+├── main.cpp             path_tracer 命令入口
+├── scene_init.cpp       从 JSON 装配 World
+├── world.*              相机、几何、材质、光源，以及面光源登记
+├── render_scene.*       管理 World 和 BVH，提供最近命中与阴影可见性查询
+├── core/                向量、随机采样、射线、命中记录与图元求交
+├── acceleration/        BVH 构建和遍历
+├── io/                  OBJ 导入与 JSON 字段校验
+├── materials/           材质参数解析、散射求值与方向采样
+├── textures/            P3 贴图读取与 UV 查询
+├── lighting/            点光源、面光源与环境光采样
+├── render/              相机、路径积分、图块调度与 Film
+└── test/                独立的 normal_preview 法线检查程序
+tests/                   单元测试、命令行测试及 C++ 内置回归场景
+tools/                   资产生成、对照与历史验证脚本
+third_party/nlohmann/    随项目分发的 JSON 解析库
+docs/                    设计、素材来源与阶段记录
+```

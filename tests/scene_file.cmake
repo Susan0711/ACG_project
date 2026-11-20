@@ -1,0 +1,40 @@
+set(work "${CMAKE_CURRENT_BINARY_DIR}/Testing/scene_file")
+file(MAKE_DIRECTORY "${work}/scene" "${work}/assets")
+configure_file("${PROJECT_DIR}/scene/forest.json" "${work}/scene/forest.json" COPYONLY)
+foreach(asset rock.obj rock.ppm)
+  configure_file("${PROJECT_DIR}/assets/${asset}" "${work}/assets/${asset}" COPYONLY)
+endforeach()
+file(REMOVE "${work}/path.ppm")
+
+execute_process(COMMAND "${TRACER}" --scene forest.json WORKING_DIRECTORY "${work}"
+  RESULT_VARIABLE status OUTPUT_VARIABLE log ERROR_VARIABLE error)
+if(NOT status STREQUAL "0" OR NOT log MATCHES "Loaded scene/forest.json \\(primitives=8, materials=1\\)[\r\n]+Prepared RenderScene and Film \\(256x256\\)[\r\n]+Rendered 65536 pixels \\(64 samples/pixel, threads=1\\)[\r\n]+Wrote path.ppm")
+  message(FATAL_ERROR "Scene render failed: ${log}${error}")
+endif()
+
+file(STRINGS "${work}/path.ppm" lines)
+list(SUBLIST lines 0 3 header)
+list(LENGTH lines count)
+if(NOT header STREQUAL "P3;256 256;255" OR NOT count EQUAL 65539)
+  message(FATAL_ERROR "Unexpected PPM header or pixel count: ${header}, ${count} total lines")
+endif()
+
+file(SHA256 "${work}/path.ppm" single_thread_hash)
+file(REMOVE "${work}/path.ppm")
+execute_process(COMMAND "${TRACER}" --threads 4 --scene forest.json WORKING_DIRECTORY "${work}"
+  RESULT_VARIABLE status OUTPUT_VARIABLE log ERROR_VARIABLE error)
+if(NOT status STREQUAL "0" OR NOT log MATCHES "threads=4\\)")
+  message(FATAL_ERROR "Multi-threaded scene render failed: ${log}${error}")
+endif()
+file(SHA256 "${work}/path.ppm" multi_thread_hash)
+if(NOT multi_thread_hash STREQUAL single_thread_hash)
+  message(FATAL_ERROR "Changing --threads changed the image")
+endif()
+
+foreach(invalid IN ITEMS 0 -1 257 1.5 4x)
+  execute_process(COMMAND "${TRACER}" --scene forest.json --threads "${invalid}" WORKING_DIRECTORY "${work}"
+    RESULT_VARIABLE status ERROR_VARIABLE error)
+  if(status STREQUAL "0" OR NOT error MATCHES "Usage:")
+    message(FATAL_ERROR "Expected invalid --threads ${invalid} to fail during argument parsing")
+  endif()
+endforeach()

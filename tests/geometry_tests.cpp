@@ -1,4 +1,4 @@
-#include "geometry.h"
+#include "test/normal_preview.h"
 #include <iostream>
 #include <stdexcept>
 void check_at(bool ok, int line) { if (!ok) throw std::runtime_error("geometry_tests.cpp line " + std::to_string(line)); }
