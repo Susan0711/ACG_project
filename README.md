@@ -96,7 +96,8 @@ cmake --build build-local --target path_tracer --parallel
 │       ├── type                    五选一
 │       │   ├── "diffuse"           color 或 texture 二选一
 │       │   │   ├── color           常量反照率 [r, g, b]，各通道在 [0, 1] 内
-│       │   │   └── texture         颜色贴图路径（P3 PPM），按 UV 读取反照率
+│       │   │   ├── texture         颜色贴图路径（P3 PPM），按 UV 读取反照率
+│       │   │   └── toon_bands      可选整数。0（默认）为连续明暗，2 或更大为明暗档数，包含最暗档和最亮档
 │       │   ├── "mirror"            color 为镜面反射率 [r, g, b]，各通道在 [0, 1] 内
 │       │   ├── "glass"             ior 为介质折射率，必须大于 0
 │       │   ├── "principled"        color 或 texture 二选一，作为底色
@@ -259,6 +260,7 @@ integrate(scene, ray, ...)
 | [mis_sampling.json](scene/mis_sampling.json) | 小面光源与 HDR 天空共同照亮两颗球。固定 `--spp` 并切换 `--mode`，可观察三种策略的噪声差异。 |
 | [principled_maps.json](scene/principled_maps.json) | 面光源斜照一块平板。分别切换 `normal_map_enabled` 和 `roughness_map_enabled`，观察细条纹引起的高光偏转和两个宽分区的高光宽度。 |
 | [mipmap_pier.json](scene/mipmap_pier.json) | 沿斜向延伸的栈桥看近、远两端的木纹。将 `boards.texture_filter` 在 `bilinear` 和 `mipmap` 间切换，可在同一机位比较固定原图与自适应选层。 |
+| [toon_shading.json](scene/toon_shading.json) | 点光源从左上方照亮橙色球体。将 `sphere.toon_bands` 从 4 改为 0，可对照同一球面的四档明暗与连续渐变。 |
 | [tidewatch.json](scene/tidewatch.json) | 潮汐观测站将塔楼、码头、海面和帆船组合在一份 JSON 中。海面用带法线的波浪网格配合镜面材质，船的多个部件共用平移速度。 |
 
 ## 项目结构
@@ -324,3 +326,7 @@ docs/                    设计、素材来源与阶段记录
 ### B3：自适应 mipmap
 
 加载底色贴图时，`mipmap` 在线性 RGB 中按面积平均，依次生成并保存缩小的纹理，直到 1×1。渲染时根据视场角、输出高度和传播距离估计像素的射线锥宽度，再通过表面几何和 UV 梯度求得覆盖范围的长轴。若长轴覆盖 `ρ` 个纹素，取 `log₂(max(1, ρ))` 选择层级，在相邻两层分别做双线性采样后插值。
+
+### B4：卡通风格渲染
+
+漫反射材质将着色法线与光照方向的夹角余弦舍入到最近的亮度档位。四档对应 0、1/3、2/3 和 1。直接光求值和散射采样共用这一响应，光源衰减与阴影透射率仍按场景计算。

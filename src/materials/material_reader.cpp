@@ -2,6 +2,7 @@
 #include "io/json_fields.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -58,9 +59,17 @@ Material read_material(const nlohmann::json& entry, const std::filesystem::path&
             material.roughness = unit_parameter(entry, "roughness", material.roughness);
             material.normal_map = read_data_map(entry, "normal_map", scene_directory);
             material.roughness_map = read_data_map(entry, "roughness_map", scene_directory);
+        } else if (type == "diffuse") {
+            json_fields::expect_fields(entry, {"type", base_field, "opacity", "opacity_map", "texture_filter", "toon_bands"});
+            const auto bands = entry.find("toon_bands");
+            if (bands != entry.end()) {
+                if (!bands->is_number_integer() || *bands < 0 || *bands == 1 || *bands > std::numeric_limits<int>::max())
+                    throw std::runtime_error("toon_bands must be 0 or an integer from 2 to INT_MAX");
+                material.toon_bands = bands->get<int>();
+            }
         } else {
             json_fields::expect_fields(entry, {"type", base_field, "opacity", "opacity_map", "texture_filter"});
-            material.kind = type == "diffuse" ? Kind::diffuse : Kind::mirror;
+            material.kind = Kind::mirror;
         }
         if (entry.contains("texture_filter") && !textured)
             throw std::runtime_error("texture_filter requires a base color texture");

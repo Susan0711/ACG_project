@@ -20,6 +20,17 @@ Vec3 sample_cosine(Vec3 normal, Sampler& rng) {
     return direction_about(normal, std::sqrt(u), std::sqrt(1 - u), 2 * pi * rng.next());
 }
 
+Vec3 diffuse_weight(const Material& material, const HitRecord& hit, double cosine) {
+    const Vec3 albedo = material.albedo(hit.uv, hit.albedo_lod);
+    if (material.toon_bands == 0) return albedo;
+    if (cosine <= 0) return {};
+    const double intervals = material.toon_bands - 1;
+    const double band = std::round(std::min(cosine, 1.0) * intervals) / intervals;
+    // Multiplying f by cosine in direct lighting recovers the band. With PDF = cosine/pi,
+    // this same albedo-scaled ratio is the weight of a sampled bounce.
+    return albedo * (band / cosine);
+}
+
 double ggx_alpha(const Material& material, UV uv) {
     const double roughness = material.roughness_at(uv);
     return std::max(0.001, roughness * roughness);
@@ -64,9 +75,9 @@ BSDFEvaluation evaluate_bsdf(const Material& material, const Ray& incident, cons
     if (material.kind == Kind::principled)
         return evaluate_principled(material, incident.direction.normalized() * -1, hit, direction);
     if (!material.has_continuous_bsdf()) return {};
-    double density = cosine_pdf(hit.normal, direction);
-    if (density == 0) return {};
-    return {material.albedo(hit.uv, hit.albedo_lod) * (1.0 / pi), density};
+    const double cosine = std::max(0.0, hit.normal.dot(direction));
+    if (cosine == 0) return {};
+    return {diffuse_weight(material, hit, cosine) * (1.0 / pi), cosine / pi};
 }
 double fresnel(double c,double ei,double et) {
     c=std::clamp(c,0.0,1.0);
@@ -79,7 +90,8 @@ BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampl
     Vec3 d=ray.direction.normalized(),n=h.normal;
     if(m.kind==Kind::diffuse) {
         Vec3 wi = sample_cosine(n, rng);
-        return {wi,m.albedo(h.uv, h.albedo_lod),cosine_pdf(n,wi),false};
+        const double cosine = std::max(0.0, n.dot(wi));
+        return {wi, diffuse_weight(m, h, cosine), cosine / pi, false};
     }
     if (m.kind == Kind::principled) {
         Vec3 wi;

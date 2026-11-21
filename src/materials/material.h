@@ -16,6 +16,7 @@ struct Material {
     double roughness = 0.5;
     std::shared_ptr<const Texture> normal_map{};
     std::shared_ptr<const Texture> roughness_map{};
+    int toon_bands = 0;  // Diffuse only. Zero keeps the Lambertian cosine response.
     double roughness_at(UV uv) const { return roughness_map ? roughness_map->value(uv).x : roughness; }
     bool has_continuous_bsdf() const { return kind == Kind::diffuse || kind == Kind::principled; }
     bool is_emitter() const { return kind == Kind::emissive; }

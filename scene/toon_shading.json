@@ -1,0 +1,15 @@
+{
+  "film": {"width": 400, "height": 300},
+  "camera": {"position": [0, 3.3, 5.8], "target": [0, 1, 0], "fov_degrees": 27},
+  "materials": {
+    "sphere": {"type": "diffuse", "color": [0.75, 0.24, 0.065], "toon_bands": 4},
+    "floor": {"type": "diffuse", "color": [0.10, 0.13, 0.16]}
+  },
+  "objects": [
+    {"mesh": "../assets/studio-sphere.obj", "position": [0, 1, 0], "material": "sphere"},
+    {"mesh": "../assets/studio-floor.obj", "position": [0, 0, 0], "material": "floor"}
+  ],
+  "lights": [
+    {"type": "point", "position": [-40, 52, 36], "intensity": [20000, 20000, 20000]}
+  ]
+}
