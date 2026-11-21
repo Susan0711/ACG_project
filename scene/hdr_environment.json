@@ -1,0 +1,17 @@
+{
+  "film": { "width": 720, "height": 400 },
+  "camera": { "position": [-6.8, 1.85, 0], "target": [0, 0.92, 0], "fov_degrees": 23 },
+  "materials": {
+    "matte":  { "type": "diffuse", "color": [0.65, 0.65, 0.65] },
+    "mirror": { "type": "mirror",  "color": [0.98, 0.98, 0.98] },
+    "floor":  { "type": "diffuse", "color": [0.24, 0.24, 0.24] }
+  },
+  "objects": [
+    { "mesh": "../assets/studio-sphere.obj", "position": [0, 1, -1.16], "material": "matte" },
+    { "mesh": "../assets/studio-sphere.obj", "position": [0, 1,  1.16], "material": "mirror" },
+    { "mesh": "../assets/studio-floor.obj",  "position": [0, 0,  0],    "material": "floor" }
+  ],
+  "lights": [
+    { "type": "environment", "map": "../assets/studio-hdr.pfm", "rotation_degrees": 0 }
+  ]
+}

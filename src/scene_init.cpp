@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -40,7 +41,7 @@ Camera read_camera(const Json& entry) {
     return camera;
 }
 
-void add_light(World& world, const Json& entry) {
+void add_light(World& world, const Json& entry, const std::filesystem::path& directory) {
     const auto type = entry.at("type").get<std::string>();
     if (type == "point") {
         json_fields::expect_fields(entry, {"type", "position", "intensity"});
@@ -54,6 +55,21 @@ void add_light(World& world, const Json& entry) {
         if (!std::isfinite(area_squared) || area_squared <= 0)
             throw std::runtime_error("Area light needs two edges spanning a finite, nonzero area");
         world.add_area(light);
+    } else if (type == "environment") {
+        json_fields::expect_fields(entry, {"type", "map", "rotation_degrees", "intensity"});
+        if (world.lights.hdr) throw std::runtime_error("Only one environment light is supported per scene");
+        const auto map = std::filesystem::u8path(entry.at("map").get<std::string>());
+        if (map.empty()) throw std::runtime_error("environment.map must name an RGB PFM file");
+        const double degrees = json_fields::optional_number(entry, "rotation_degrees", 0);
+        const double intensity = json_fields::optional_number(entry, "intensity", 1);
+        if (!std::isfinite(degrees)) throw std::runtime_error("environment.rotation_degrees must be finite");
+        if (!std::isfinite(intensity) || intensity < 0)
+            throw std::runtime_error("environment.intensity must be finite and nonnegative");
+        auto env = std::make_shared<Environment>();
+        env->rotation = std::remainder(degrees, 360.0) * (pi / 180.0);
+        env->intensity = intensity;
+        env->load(directory / map);
+        world.lights.hdr = env;
     } else {
         throw std::runtime_error("Unknown light type: " + type);
     }
@@ -94,6 +110,6 @@ World load_scene_file(const std::filesystem::path& path) {
     }
 
     for (const Json& light : scene.at("lights").get_ref<const Json::array_t&>())
-        add_light(world, light);
+        add_light(world, light, path.parent_path());
     return world;
 }

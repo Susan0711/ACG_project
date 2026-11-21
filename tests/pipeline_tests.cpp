@@ -88,6 +88,29 @@ void check_motion_scene() {
     }
 }
 
+void check_json_environment() {
+    const World base = load_scene_file("scene/hdr_environment.json");
+    const World turned = load_scene_file("tests/scenes/hdr_quarter_turn.json");
+    require(base.lights.hdr && turned.lights.hdr, "Bind PFM relative to each scene file");
+    require(base.lights.hdr->intensity == 1 && base.lights.hdr->rotation == 0, "Unscaled, unrotated demo");
+    require(turned.lights.points.size() == 1 && turned.scene.objects.size() == 2,
+            "Point and area lights can coexist with an environment");
+
+    const Vec3 sun{-0.403, 0.796, 0.451};
+    const Vec3 turned_sun{-sun.z, sun.y, sun.x};
+    const auto original = base.lights.escape(sun);
+    const auto rotated = turned.lights.escape(turned_sun);
+    require(original.radiance.x > 10 && rotated.radiance.x == 2 * original.radiance.x &&
+            rotated.pdf == original.pdf && turned.lights.escape(sun).radiance.x < 1,
+            "Rotation moves the bright patch; intensity scales radiance");
+    const auto a = base.lights.hdr->sample(0.42, 0.36, 0.57);
+    const auto b = turned.lights.hdr->sample(0.42, 0.36, 0.57);
+    require(std::abs(b.direction.x + a.direction.z) < 1e-12 && b.direction.y == a.direction.y &&
+            std::abs(b.direction.z - a.direction.x) < 1e-12 && b.pdf == turned.lights.hdr->pdf(b.direction) &&
+            b.radiance.x == turned.lights.escape(b.direction).radiance.x,
+            "Direct samples and escaping rays agree after a 90-degree turn");
+}
+
 void check_json_lens_and_alpha() {
     const Camera camera = load_scene_file("scene/depth_of_field.json").camera;
     require(camera.lens_radius == 0.35 && camera.focus_distance == 3.6, "Load lens and focus distance");
@@ -114,6 +137,7 @@ int main() {
         check_obj_corner_normals();
         check_rock_texture();
         check_motion_scene();
+        check_json_environment();
         check_json_lens_and_alpha();
         HitRecord hit;
         Triangle triangle{{0,0,0},{1,0,0},{0,1,0},0};

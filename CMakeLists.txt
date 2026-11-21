@@ -39,11 +39,12 @@ target_include_directories(scene_input SYSTEM PRIVATE third_party)
 target_link_libraries(scene_input PUBLIC tracer)
 add_executable(path_tracer src/main.cpp)
 target_link_libraries(path_tracer PRIVATE scene_input)
-add_executable(bvh_compare EXCLUDE_FROM_ALL tools/bvh_compare.cpp)
-target_link_libraries(bvh_compare PRIVATE scene_input)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(bvh_compare EXCLUDE_FROM_ALL tests/bvh_compare.cpp)
+  target_link_libraries(bvh_compare PRIVATE scene_input)
+
   add_library(scene_library
     tests/scenes/cornell.cpp tests/scenes/forest.cpp tests/scenes/forest_v03.cpp tests/scenes/forest_v05.cpp
     tests/scenes/catalog.cpp tests/scenes/texture_scene.cpp tests/scenes/effect_scenes.cpp tests/scenes/sampling_scene.cpp)

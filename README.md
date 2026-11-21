@@ -101,15 +101,19 @@ cmake --build build-local --target path_tracer --parallel
 │   ├── material                    引用 materials 中的名称，例如 "stone"
 │   └── velocity                    可选，世界坐标中的平移速度，单位为场景长度/秒，默认 [0, 0, 0]
 └── lights[]                        每项定义一盏灯
-    └── type                        二选一
+    └── type                        三选一
         ├── "point"                 点光源
         │   ├── position            光源位置 [x, y, z]
         │   └── intensity           RGB 辐射强度，各通道 ≥ 0
-        └── "area"                  单面发光的平行四边形
-            ├── origin              发光面的一个角点 [x, y, z]
-            ├── u                   从 origin 出发的第一条边向量
-            ├── v                   从 origin 出发的第二条边向量，u × v 非零并指向发光侧
-            └── radiance            正面发出的 RGB 辐亮度，各通道 ≥ 0
+        ├── "area"                  单面发光的平行四边形
+        │   ├── origin              发光面的一个角点 [x, y, z]
+        │   ├── u                   从 origin 出发的第一条边向量
+        │   ├── v                   从 origin 出发的第二条边向量，u × v 非零并指向发光侧
+        │   └── radiance            正面发出的 RGB 辐亮度，各通道 ≥ 0
+        └── "environment"           HDR 环境光，每个场景至多一个，可与点光和面光并用
+            ├── map                 必填，经纬度 RGB 浮点 PFM 贴图，相对路径从场景 JSON 所在目录起算
+            ├── rotation_degrees    可选，绕世界 Y 轴旋转的角度，默认 0°，正 90° 将 +X 转向 +Z
+            └── intensity           可选，辐亮度的非负倍数，默认 1
 ```
 
 ### 材质类型与光学行为
@@ -223,7 +227,7 @@ integrate(scene, ray, ...)
 
 所有像素算完后，控制回到 `main()`，它调用 `film.write("path.ppm")`。对每个颜色通道，`Film::write()` 先应用曝光，将非负值 `x` 按 `x / (1 + x)` 压缩到显示范围，再作 sRGB 编码、量化成 0–255 的整数，依次写入 P3 文件。显示变换作用于已经平均好的像素。[写出实现](src/render/film.cpp)
 
-渲染库还提供 HDR 环境光和多重重要性采样（MIS），可从 C++ 测试查看用法。当前 JSON 可配置点光和面光，命令行沿用默认的 NEE 模式。[HDR 与 MIS 测试](tests/environment_tests.cpp)
+场景 JSON 可配置点光、面光和 HDR 环境光。命令行默认使用 NEE。渲染库中的多重重要性采样（MIS）可从 C++ 测试查看用法。[HDR 与 MIS 测试](tests/environment_tests.cpp)
 
 ## 场景示例
 
@@ -234,6 +238,7 @@ integrate(scene, ray, ...)
 | [depth_of_field.json](scene/depth_of_field.json) | 同一个岩石网格分别摆在近处和远处。用 `focus_distance` 指定焦平面，用 `lens_radius` 调整光圈半径，设为 0 即恢复针孔相机。 |
 | [alpha_shadow.json](scene/alpha_shadow.json) | 一张薄片通过 `opacity_map` 定义叶片覆盖率。阴影射线每穿过一层，就将透过的直接光乘以该处的 `1 − α`。 |
 | [motion_blur.json](scene/motion_blur.json) | 相机固定，快门从 0 秒开到 1 秒。石头的 `velocity` 是 `[1.6, 0, 0]`，在射线时刻 `t` 按 `position + velocity × t` 定位。 |
+| [hdr_environment.json](scene/hdr_environment.json) | 左侧灰色漫反射球和右侧镜面球共用一个球体网格。将 `rotation_degrees` 从 0 改为 90，可观察受光方向和镜面倒影的移动。 |
 | [tidewatch.json](scene/tidewatch.json) | 潮汐观测站将塔楼、码头、海面和帆船组合在一份 JSON 中。海面用带法线的波浪网格配合镜面材质，船的多个部件共用平移速度。 |
 
 ## 项目结构
@@ -259,12 +264,15 @@ src/
 │   ├── direct_lighting.* 光源采样与直接光估计
 │   └── film.*           保存线性 RGB 像素并输出图像
 └── test/                独立的 normal_preview 法线检查程序
-tests/                   单元测试、命令行测试及 C++ 内置回归场景
-tools/                   资产生成、对照与历史验证脚本
+tests/                   单元测试、命令行测试、BVH 对照程序及 C++ 内置回归场景
 third_party/nlohmann/    随项目分发的 JSON 解析库
 docs/                    设计、素材来源与阶段记录
 ```
 
-### A：SAH 加速结构
+### A1：SAH 加速结构
 
 `--bvh sah` 启用表面积启发式（SAH）建树，默认的 `--bvh median` 使用中位数划分。SAH 按图元在快门区间内的包围盒中心，分别沿 X、Y、Z 轴分成 12 个桶。建树时累计每个候选切分点两侧的包围盒和图元数，选取“左盒表面积 × 左侧图元数 + 右盒表面积 × 右侧图元数”最小的切分点，再递归到每个叶子只含一个图元。没有有效切分点时回退到中位数划分。两种策略共用同一套最近命中遍历。
+
+### A2：HDR 环境光
+
+场景加载器读取 `lights[]` 中的浮点 PFM 环境贴图，按每个像素的亮度与立体角之积建立采样分布。漫反射表面从环境采样入射光，并检查该方向的遮挡。相机射线或镜面反射射线离开场景时，沿射线方向查询同一张贴图，使照明和倒影遵循相同的旋转角与强度。

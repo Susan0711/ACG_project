@@ -1,3 +1,0 @@
-primitives=28914 camera_rays=10000 seed=42 linear_hits=10000 build_trials=7
-median hits=10000 nearest_mismatches=0 max_abs_t_error=0 box_tests=4736316 primitive_tests=47990 median_build_ms=19.768
-sah hits=10000 nearest_mismatches=0 max_abs_t_error=0 box_tests=770568 primitive_tests=49303 median_build_ms=30.261

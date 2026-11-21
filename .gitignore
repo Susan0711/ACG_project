@@ -4,8 +4,8 @@
 /build-*/
 /.cache/
 /.vscode/
-/renders/tmp/
-/renders/preview/
+/renders/
+/tools/
 /tmp/
 *.log
 .DS_Store

@@ -8,9 +8,9 @@
 namespace {
 double unit(double x) { return std::clamp(x,0.0,std::nextafter(1.0,0.0)); }
 }
-void Environment::load(const std::string& path) {
+void Environment::load(const std::filesystem::path& path) {
     std::ifstream in(path,std::ios::binary);
-    if(!in) throw std::runtime_error("Cannot open floating HDR environment: "+path);
+    if(!in) throw std::runtime_error("Cannot open floating HDR environment: "+path.u8string());
     std::string magic,line;
     std::getline(in,magic);
     if(!magic.empty() && magic.back()=='\r') magic.pop_back();
