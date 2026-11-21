@@ -44,6 +44,8 @@ include(CTest)
 if(BUILD_TESTING)
   add_executable(bvh_compare EXCLUDE_FROM_ALL tests/bvh_compare.cpp)
   target_link_libraries(bvh_compare PRIVATE scene_input)
+  add_executable(mis_compare EXCLUDE_FROM_ALL tests/mis_compare.cpp)
+  target_link_libraries(mis_compare PRIVATE scene_input)
 
   add_library(scene_library
     tests/scenes/cornell.cpp tests/scenes/forest.cpp tests/scenes/forest_v03.cpp tests/scenes/forest_v05.cpp

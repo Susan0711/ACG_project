@@ -40,6 +40,7 @@ cmake --build build-local --target path_tracer --parallel
 | `--width <像素>`、`--height <像素>` | 可选，每项为 1–16384 的整数。按轴覆盖场景的 `film.width`、`film.height`。若场景和命令行都省略某一轴，该轴取 256。 |
 | `--spp <整数>` | 可选，每像素路径样本数，正整数，默认 64。相同尺寸下，提高 spp 会增加计算量，通常能降低采样噪声。 |
 | `--threads <整数>` | 可选，范围 1–256，默认 1。线程分担图块，每个像素仍取相同数量的样本。 |
+| `--mode <策略>` | 可选。`bsdf` 按材质采样方向，`nee` 显式采样光源，`mis` 对光源与材质两种采样的贡献加权。默认 `nee`。 |
 
 以潮汐观测站为例，在上述运行命令中将文件名换成 `tidewatch.json`。以下两档均使用同一机位、16:9 画幅和默认随机种子。分辨率会参与相机射线计算，固定垂直视场角时，加宽画幅会扩大水平视野。
 
@@ -227,7 +228,7 @@ integrate(scene, ray, ...)
 
 所有像素算完后，控制回到 `main()`，它调用 `film.write("path.ppm")`。对每个颜色通道，`Film::write()` 先应用曝光，将非负值 `x` 按 `x / (1 + x)` 压缩到显示范围，再作 sRGB 编码、量化成 0–255 的整数，依次写入 P3 文件。显示变换作用于已经平均好的像素。[写出实现](src/render/film.cpp)
 
-场景 JSON 可配置点光、面光和 HDR 环境光。命令行默认使用 NEE。渲染库中的多重重要性采样（MIS）可从 C++ 测试查看用法。[HDR 与 MIS 测试](tests/environment_tests.cpp)
+场景 JSON 可配置点光、面光和 HDR 环境光。使用 `--mode mis` 可对面光源和 HDR 环境光启用多重重要性采样。[直接光估计](src/render/direct_lighting.cpp)
 
 ## 场景示例
 
@@ -239,6 +240,7 @@ integrate(scene, ray, ...)
 | [alpha_shadow.json](scene/alpha_shadow.json) | 一张薄片通过 `opacity_map` 定义叶片覆盖率。阴影射线每穿过一层，就将透过的直接光乘以该处的 `1 − α`。 |
 | [motion_blur.json](scene/motion_blur.json) | 相机固定，快门从 0 秒开到 1 秒。石头的 `velocity` 是 `[1.6, 0, 0]`，在射线时刻 `t` 按 `position + velocity × t` 定位。 |
 | [hdr_environment.json](scene/hdr_environment.json) | 左侧灰色漫反射球和右侧镜面球共用一个球体网格。将 `rotation_degrees` 从 0 改为 90，可观察受光方向和镜面倒影的移动。 |
+| [mis_sampling.json](scene/mis_sampling.json) | 小面光源与 HDR 天空共同照亮两颗球。固定 `--spp` 并切换 `--mode`，可观察三种策略的噪声差异。 |
 | [tidewatch.json](scene/tidewatch.json) | 潮汐观测站将塔楼、码头、海面和帆船组合在一份 JSON 中。海面用带法线的波浪网格配合镜面材质，船的多个部件共用平移速度。 |
 
 ## 项目结构
@@ -264,7 +266,7 @@ src/
 │   ├── direct_lighting.* 光源采样与直接光估计
 │   └── film.*           保存线性 RGB 像素并输出图像
 └── test/                独立的 normal_preview 法线检查程序
-tests/                   单元测试、命令行测试、BVH 对照程序及 C++ 内置回归场景
+tests/                   单元测试、命令行测试、BVH 与 MIS 对照程序及 C++ 内置回归场景
 third_party/nlohmann/    随项目分发的 JSON 解析库
 docs/                    设计、素材来源与阶段记录
 ```
@@ -276,3 +278,7 @@ docs/                    设计、素材来源与阶段记录
 ### A2：HDR 环境光
 
 场景加载器读取 `lights[]` 中的浮点 PFM 环境贴图，按每个像素的亮度与立体角之积建立采样分布。漫反射表面从环境采样入射光，并检查该方向的遮挡。相机射线或镜面反射射线离开场景时，沿射线方向查询同一张贴图，使照明和倒影遵循相同的旋转角与强度。
+
+### A3：多重重要性采样 MIS
+
+`--mode mis` 结合光源采样与 BSDF 采样。两种策略都能采到同一面光源或环境方向时，当前策略按 `p² / (p² + q²)` 加权，`p` 和 `q` 分别是当前策略和另一策略在该方向上的立体角概率密度。积分器记录上一跳的 BSDF 密度，以便在射线命中光源或逃逸到环境时计算互补权重。点光源的直接采样和理想镜面、玻璃散射后的光源命中取权重 1。

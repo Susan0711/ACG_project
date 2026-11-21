@@ -15,6 +15,7 @@ struct Options {
     std::filesystem::path scene_path;
     std::optional<int> width, height, spp, threads;
     std::optional<BVHSplit> bvh;
+    std::optional<SamplingMode> mode;
 };
 
 bool read_option(std::string_view text, int maximum, std::optional<int>& option) {
@@ -46,6 +47,11 @@ bool parse_arguments(int argc, char** argv, Options& options) {
             if (value == "median") options.bvh = BVHSplit::median;
             else if (value == "sah") options.bvh = BVHSplit::sah;
             else return false;
+        } else if (option == "--mode" && !options.mode) {
+            if (value == "bsdf") options.mode = SamplingMode::bsdf;
+            else if (value == "nee") options.mode = SamplingMode::nee;
+            else if (value == "mis") options.mode = SamplingMode::mis;
+            else return false;
         } else {
             return false;
         }
@@ -62,12 +68,13 @@ int main(int argc, char** argv) {
         if (!parse_arguments(argc, argv, options)) {
             std::cerr << "Usage: path_tracer --scene <file.json> [--width <1-" << FilmSize::max_dimension
                       << ">] [--height <1-" << FilmSize::max_dimension << ">] [--spp <positive integer>] [--threads <1-"
-                      << RenderSettings::max_threads << ">] [--bvh median|sah]\n";
+                      << RenderSettings::max_threads << ">] [--bvh median|sah] [--mode bsdf|nee|mis]\n";
             return 1;
         }
         if (!path.has_parent_path()) path = std::filesystem::path("scene") / path;
         settings.spp = options.spp.value_or(settings.spp);
         settings.threads = options.threads.value_or(settings.threads);
+        settings.mode = options.mode.value_or(settings.mode);
 
         World world = load_scene_file(path);
         std::cout << "Loaded " << path.generic_u8string()

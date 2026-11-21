@@ -84,7 +84,8 @@ foreach(value IN ITEMS 0 -2 2.5 16385 "\"3\"" true 18446744073709551615)
 endforeach()
 
 foreach(args IN ITEMS "--width;0" "--height;16385" "--spp;-1" "--spp;1.5" "--spp;2147483648" "--width;1;--width;2"
-    "--bvh;unknown" "--bvh;median;--bvh;sah" "--bvh")
+    "--bvh;unknown" "--bvh;median;--bvh;sah" "--bvh"
+    "--mode;unknown" "--mode;nee;--mode;mis" "--mode")
   execute_process(COMMAND "${TRACER}" --scene forest.json ${args} WORKING_DIRECTORY "${work}"
     RESULT_VARIABLE status ERROR_VARIABLE error)
   if(status STREQUAL "0" OR NOT error MATCHES "Usage:")
@@ -126,3 +127,25 @@ check_environment("{${env_fields},\"intensity\":-0.5}" "environment[.]intensity"
 check_environment("{${env_fields},\"rotation_degrees\":\"90\"}" "rotation_degrees")
 check_environment([=[{"type":"environment"}]=] "map")
 check_environment([=[{"type":"environment","map":"missing.pfm"}]=] "missing.pfm")
+
+function(sampling_hash result)
+  file(REMOVE "${work}/path.ppm")
+  execute_process(COMMAND "${TRACER}" --scene "${PROJECT_DIR}/scene/mis_sampling.json"
+    --width 32 --height 18 --spp 4 --bvh sah ${ARGN} WORKING_DIRECTORY "${work}"
+    RESULT_VARIABLE status ERROR_VARIABLE error OUTPUT_QUIET)
+  if(NOT status STREQUAL "0")
+    message(FATAL_ERROR "Sampling render failed: ${error}")
+  endif()
+  file(SHA256 "${work}/path.ppm" hash)
+  set(${result} "${hash}" PARENT_SCOPE)
+endfunction()
+sampling_hash(default_hash)
+foreach(mode IN ITEMS bsdf nee mis)
+  sampling_hash(${mode}_hash --mode ${mode})
+endforeach()
+if(NOT default_hash STREQUAL nee_hash)
+  message(FATAL_ERROR "Default sampling mode must match explicit NEE")
+endif()
+if(bsdf_hash STREQUAL nee_hash OR bsdf_hash STREQUAL mis_hash OR nee_hash STREQUAL mis_hash)
+  message(FATAL_ERROR "The three modes must select distinct estimators on the MIS comparison scene")
+endif()
