@@ -1,4 +1,4 @@
-# ACG Track 1 · CPU 路径追踪器
+# ACG Track 1 · 路径追踪器
 
 这是一个用 C++17 编写的离线渲染器。给定相机、三角网格、材质和光源，程序从相机穿过每个像素发出射线，追踪光在场景中的反射与折射，估计到达相机的光，再写成 PPM 图像。
 
@@ -184,7 +184,7 @@ load_scene_file(path)
 
 ### 3. BVH 构建与 `Film` 初始化
 
-`RenderScene` 的构造函数接管 `World`，按相机快门区间调用一次 `BVH::build()`。`bounds()` 先计算每个三角形在该区间内的包围盒，局部函数 `build_range` 合并当前组的包围盒，再由 `split_median()` 沿最长轴按盒中心排序、从中间分组，递归到每个叶节点只存一个图元索引。稍后每条射线查询的都是这棵树。[RenderScene 构造](src/render/render.cpp) · [BVH 建树与遍历](src/acceleration/bvh.cpp)
+`RenderScene` 的构造函数接管 `World`，按相机快门区间调用一次 `BVH::build()`。`bounds()` 先计算每个三角形在该区间内的包围盒，局部函数 `build_range` 合并当前组的包围盒，默认按 SAH 选择分割位置，显式选择 `median` 时沿最长轴按盒中心排序并从中间分组，递归到每个叶节点只存一个图元索引。稍后每条射线查询的都是这棵树。[RenderScene 构造](src/render/render.cpp) · [BVH 建树与遍历](src/acceleration/bvh.cpp)
 
 接下来 `main()` 按已解析的宽高创建 `Film`。例如 `forest.json` 省略了 `film`，按默认参数运行时画布为 256 × 256，共 65,536 个像素。工作线程共享只读的 `RenderScene`，将各自负责的像素写入同一个 `Film`。[场景查询接口](src/render/render.h) · [Film 定义](src/render/film.h)
 
@@ -298,7 +298,7 @@ docs/                    设计、素材来源与阶段记录
 
 ### A1：SAH 加速结构
 
-`--bvh sah` 启用表面积启发式（SAH）建树，默认的 `--bvh median` 使用中位数划分。SAH 按图元在快门区间内的包围盒中心，分别沿 X、Y、Z 轴分成 12 个桶。建树时累计每个候选切分点两侧的包围盒和图元数，选取“左盒表面积 × 左侧图元数 + 右盒表面积 × 右侧图元数”最小的切分点，再递归到每个叶子只含一个图元。没有有效切分点时回退到中位数划分。两种策略共用同一套最近命中遍历。
+命令行默认采用 `--bvh sah` 的表面积启发式建树，`--bvh median` 选择中位数划分。SAH 按图元在快门区间内的包围盒中心，分别沿 X、Y、Z 轴分成 12 个桶。建树时累计每个候选切分点两侧的包围盒和图元数，选取“左盒表面积 × 左侧图元数 + 右盒表面积 × 右侧图元数”最小的切分点，再递归到每个叶子只含一个图元。没有有效切分点时回退到中位数划分。两种策略共用同一套最近命中遍历。
 
 ### A2：HDR 环境光
 
@@ -347,3 +347,32 @@ docs/                    设计、素材来源与阶段记录
 ### B6：多层材质
 
 `coated` 在 Principled 基底上增加介电 GGX 清漆层。`coat_ior` 和 `coat_roughness` 控制上层反射，`coat_thickness`（场景长度）与 `coat_absorption`（长度倒数）控制下层光经双程透射后的 RGB 吸收。采样使用两层的混合 PDF，兼容 MIS；`coat_weight: 0` 恢复原材质。当前为单次散射近似，不含层内多次反射和完整折射方向变换。
+
+## GPU render
+
+CPU 后端使用 FP64。启用 `--backend=gpu` 后，GPU 上的射线、BVH 包围盒、图元求交和命中参数全部使用 FP32。建树、着色和像素累加仍在 CPU 上使用 FP64。
+
+### C1：单独针对 BVH intersection 的 kernel
+
+CPU 建立覆盖快门区间的 SAH BVH。CUDA 后端将场景转换为局部坐标，每个线程为一条射线顺序遍历 DFS 节点，包围盒未命中时跳过整棵子树。叶子测试三角形或球，返回最近命中的图元编号、距离和重心坐标。CPU 根据这些参数还原命中并处理材质、MIS、介质、色散和轮盘赌。[CUDA 求交](src/acceleration/intersection_fp32.cuh) · [路径积分](src/render/path_integrator.cpp)
+
+主路径队列最多容纳 32,768 条路径，每个 block 有 256 个线程。初始射线按 16 × 16 图块、样本编号和图块内的像素行排列。返回命中后，CPU 整理继续反弹及穿过透明表面的主路径，将待续查的阴影和就绪主射线分别紧凑排列，再合并为一次求交调用。半透明遮挡逐次推进交点下界并累乘透射率，只有所属的路径等待该阴影；其他路径可以继续反弹或结束。同一样本保留自己的随机数状态；像素按样本编号累加。[批次调度](src/render/wavefront.cpp)
+
+`--gpu-refill-threshold N` 控制何时补充相机路径，只对 `--backend=gpu` 生效。范围为 0 到 32,768。默认值 **8,192** 取容量的四分之一，参考 Cycles 的活跃主路径比例。正在等待自身直接光贡献的路径也占一个活动槽。每轮开始时，如果队列已空或活动槽数严格低于 N，就从剩余相机样本补到容量。N 为 0 时，当前组跑空才取下一组。最后只剩少量射线时按实际数量发射。为控制有序成像的内存占用，每处理至多 262,144 个相机样本就归并一次颜色。[Cycles 调度源码](https://github.com/blender/blender/blob/main/intern/cycles/integrator/path_trace_work_gpu.cpp)
+
+在具有 CUDA 12.8 工具链、CMake 3.18 以上和 OpenMP 的 Linux RTX 5090 机器上，可用以下命令复现 CPU/GPU 同配置对照。两次运行使用各自的空输出目录。CPU 构建沿用文首命令，默认后端为 CPU。
+
+```sh
+cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DACG_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120
+cmake --build build-cuda --parallel
+ctest --test-dir build-cuda --output-on-failure
+mkdir -p compare/cpu compare/gpu
+(cd compare/cpu && ../../build-cuda/path_tracer --scene ../../scene/tidewatch.json --backend=cpu --width 160 --height 90 --spp 32 --threads 8 --mode mis)
+(cd compare/gpu && ../../build-cuda/path_tracer --scene ../../scene/tidewatch.json --backend=gpu --width 160 --height 90 --spp 32 --threads 8 --mode mis)
+```
+
+GPU 日志分别记录准备显存的 `gpu_prepare_seconds`、完整采样与着色的 `render_seconds`、纯求交的 `kernel_ms`、含射线上传及命中下载的 `batch_ms`。后两项均为各批累计值，已包含在渲染区间中。`gpu_refill_threshold`、`peak_active`、`refills`、`queries` 和 `batches` 可用于核对阈值实验。
+
+#### FP64 转 FP32 时遇到的一个小问题
+
+在高山湖场景里，射线穿过半透明针叶后要继续向前查找。如果只往前挪一点，这点偏移在 FP32 下可能被舍掉，下一次又会命中同一片针叶。现在沿用同一条射线，把下一次查询的距离下界推进到比上次命中距离至少大一个 FP32 刻度的位置，就能越过刚才那一层。

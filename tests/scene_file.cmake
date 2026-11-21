@@ -84,6 +84,8 @@ foreach(value IN ITEMS 0 -2 2.5 16385 "\"3\"" true 18446744073709551615)
 endforeach()
 
 foreach(args IN ITEMS "--width;0" "--height;16385" "--spp;-1" "--spp;1.5" "--spp;2147483648" "--width;1;--width;2"
+    "--backend=invalid" "--backend=cpu;--gpu-refill-threshold;0" "--backend=gpu;--gpu-refill-threshold;32769"
+    "--backend=cpu;--backend;gpu"
     "--bvh;unknown" "--bvh;median;--bvh;sah" "--bvh"
     "--mode;unknown" "--mode;nee;--mode;mis" "--mode")
   execute_process(COMMAND "${TRACER}" --scene forest.json ${args} WORKING_DIRECTORY "${work}"

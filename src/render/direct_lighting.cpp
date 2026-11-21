@@ -21,8 +21,18 @@ double light_weight(SamplingMode mode, const LightSample& light, double scatter_
 }
 }
 
+namespace {
+void add_light(const RenderScene& scene, const DirectLightSample& sample,
+               std::vector<DirectLightSample>* pending, Vec3& result) {
+    if (sample.segment.distance == 0) return;
+    if (pending) pending->push_back(sample);
+    else result = result + sample.contribution(scene.visibility_to_light(sample.segment.ray, sample.segment.distance));
+}
+}
+
 Vec3 direct_lighting(const RenderScene& scene, const Ray& incident, const HitRecord& hit,
-                     const Material& material, Sampler& rng, SamplingMode mode) {
+                     const Material& material, Sampler& rng, SamplingMode mode,
+                     std::vector<DirectLightSample>* pending) {
     if (mode == SamplingMode::bsdf || !material.has_continuous_bsdf()) return {};
 
     Vec3 result{};
@@ -32,22 +42,23 @@ Vec3 direct_lighting(const RenderScene& scene, const Ray& incident, const HitRec
         const double cosine = std::abs(hit.normal.dot(light.direction));
         if (cosine == 0 || (bsdf.value.x == 0 && bsdf.value.y == 0 && bsdf.value.z == 0)) return;
 
-        const double visibility = scene.visibility(hit, light);
         const double weight = light_weight(mode, light, bsdf.pdf);
-        result = result + multiply(bsdf.value, light.radiance) * (cosine * visibility * weight / light.pdf);
+        add_light(scene, {scene.shadow_segment(hit, light), multiply(bsdf.value, light.radiance),
+                          cosine, weight, light.pdf}, pending, result);
     });
     return result;
 }
 
 Vec3 medium_direct_lighting(const RenderScene& scene, Vec3 position, double time,
-                            Sampler& rng, SamplingMode mode) {
+                            Sampler& rng, SamplingMode mode,
+                     std::vector<DirectLightSample>* pending) {
     if (mode == SamplingMode::bsdf) return {};
     Vec3 result{};
     scene.lights().sample_each(position, rng, [&](const LightSample& light) {
         if (light.pdf <= 0) return;
-        const double transmission = scene.visibility_to_light({position, light.direction, time}, light.distance);
         const double weight = light_weight(mode, light, isotropic_phase_pdf);
-        result = result + light.radiance * (isotropic_phase_pdf * transmission * weight / light.pdf);
+        add_light(scene, {{{position, light.direction, time}, light.distance}, light.radiance,
+                          isotropic_phase_pdf, weight, light.pdf}, pending, result);
     });
     return result;
 }

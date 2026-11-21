@@ -3,6 +3,8 @@
 #include "world.h"
 #include <optional>
 
+struct ShadowSegment { Ray ray; double distance; };
+
 enum class Acceleration { linear, bvh };
 
 // Own the geometry and its index together for the lifetime of a render.
@@ -16,6 +18,10 @@ public:
     const Medium& medium() const { return world_.medium; }
     const Material& material(const HitRecord& hit) const { return world_.materials.at(hit.material_id); }
     bool intersect(const Ray&, double minimum, double maximum, HitRecord&) const;
+    void apply_surface_maps(const Ray&, HitRecord&) const;
+    const Scene& geometry() const { return world_.scene; }
+    const BVH& bvh() const { return bvh_.value(); }
+    ShadowSegment shadow_segment(const HitRecord&, const LightSample&) const;
     double visibility(const HitRecord&, const LightSample&) const;
     double shadow_transmittance(Ray, double t_max) const;
     double visibility_to_light(const Ray& shadow, double distance) const;

@@ -37,6 +37,11 @@ RenderScene::RenderScene(World world, Acceleration backend, BVHSplit split) : wo
 
 bool RenderScene::intersect(const Ray& ray, double minimum, double maximum, HitRecord& hit) const {
     if (!intersect_geometry(ray, minimum, maximum, hit)) return false;
+    apply_surface_maps(ray, hit);
+    return true;
+}
+
+void RenderScene::apply_surface_maps(const Ray& ray, HitRecord& hit) const {
     if (has_mipmaps_ && (ray.cone.spread > 0 || ray.cone.width > 0)) {
         const auto& texture = material(hit).texture;
         if (texture && texture->last_level() > 0) {
@@ -54,7 +59,6 @@ bool RenderScene::intersect(const Ray& ray, double minimum, double maximum, HitR
             if (mapped.dot(ray.direction) < 0) hit.normal = mapped;
         }
     }
-    return true;
 }
 
 bool RenderScene::intersect_geometry(const Ray& ray, double minimum, double maximum, HitRecord& hit) const {
@@ -64,7 +68,7 @@ bool RenderScene::intersect_geometry(const Ray& ray, double minimum, double maxi
     return world_.scene.intersect(ray, minimum, maximum, hit);
 }
 
-double RenderScene::visibility(const HitRecord& hit, const LightSample& light) const {
+ShadowSegment RenderScene::shadow_segment(const HitRecord& hit, const LightSample& light) const {
     Ray shadow = spawn(hit, light.direction);
     double distance = light.distance;
     if (std::isfinite(distance)) {
@@ -72,10 +76,15 @@ double RenderScene::visibility(const HitRecord& hit, const LightSample& light) c
         const Vec3 target = hit.position + light.direction * distance;
         const Vec3 offset = target - shadow.origin;
         distance = std::sqrt(offset.dot(offset));
-        if (distance <= 1e-5) return 0;
+        if (distance <= 1e-5) return {shadow, 0};
         shadow.direction = offset * (1 / distance);
     }
-    return visibility_to_light(shadow, distance);
+    return {shadow, distance};
+}
+
+double RenderScene::visibility(const HitRecord& hit, const LightSample& light) const {
+    const auto segment = shadow_segment(hit, light);
+    return segment.distance == 0 ? 0 : visibility_to_light(segment.ray, segment.distance);
 }
 
 double RenderScene::visibility_to_light(const Ray& shadow, double distance) const {

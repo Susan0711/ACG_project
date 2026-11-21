@@ -1,5 +1,6 @@
 #pragma once
 #include "core/ray.h"
+#include "core/intersection_math.h"
 #include <array>
 #include <optional>
 #include <variant>
@@ -13,6 +14,7 @@ struct Sphere {
     int material_id = 0;
     Vec3 velocity{};
     Vec3 center_at(double time) const { return center + velocity*time; }
+    void finish_hit(const Ray&, const HitParameters&, HitRecord&) const;
     bool intersect(const Ray&, double t_min, double t_max, HitRecord&) const;
     Vec3 mapped_normal(const HitRecord&, Vec3 tangent_space_normal) const;
     std::optional<UVGradients> uv_gradients(const HitRecord&) const;
@@ -25,6 +27,7 @@ struct Triangle {
     Vec3 velocity{};  // Uniform world-space translation per second; vertices are stored at time zero.
     std::optional<std::array<Vec3, 3>> corner_normals{};
     bool has_complete_uvs = true;
+    void finish_hit(const Ray&, const HitParameters&, HitRecord&) const;
     bool intersect(const Ray&, double t_min, double t_max, HitRecord&) const;
     Vec3 mapped_normal(const HitRecord&, Vec3 tangent_space_normal) const;
     std::optional<UVGradients> uv_gradients(const HitRecord&) const;
