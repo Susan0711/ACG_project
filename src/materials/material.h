@@ -4,7 +4,7 @@
 #include "core/sampling.h"
 #include <memory>
 
-enum class Kind { diffuse, mirror, glass, emissive, principled };
+enum class Kind { diffuse, mirror, glass, emissive, principled, coated };
 enum class Wavelength { red = 650, green = 550, blue = 450 };  // Representative wavelengths in nm.
 struct Material {
     Kind kind = Kind::diffuse;
@@ -19,9 +19,14 @@ struct Material {
     std::shared_ptr<const Texture> roughness_map{};
     int toon_bands = 0;  // Diffuse only. Zero keeps the Lambertian cosine response.
     double cauchy_b = 0;  // Glass only, in square micrometers. ior is the index at 550 nm.
+    double coat_weight = 1;
+    double coat_ior = 1.5;
+    double coat_roughness = 0.12;
+    double coat_thickness = 0;  // Scene length units.
+    Vec3 coat_absorption{};     // Inverse scene length, linear RGB.
     double ior_at(Wavelength) const;
     double roughness_at(UV uv) const { return roughness_map ? roughness_map->value(uv).x : roughness; }
-    bool has_continuous_bsdf() const { return kind == Kind::diffuse || kind == Kind::principled; }
+    bool has_continuous_bsdf() const { return kind == Kind::diffuse || kind == Kind::principled || kind == Kind::coated; }
     bool is_emitter() const { return kind == Kind::emissive; }
     double alpha(UV uv) const;
     Vec3 albedo(UV uv, double lod=0) const { return texture ? texture->value(uv, lod) : color; }

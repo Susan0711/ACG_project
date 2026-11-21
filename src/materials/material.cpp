@@ -40,6 +40,14 @@ double specular_probability(const Material& material) {
     return 0.5 + 0.5 * material.metallic;
 }
 
+Vec3 sample_ggx(Vec3 incident, Vec3 normal, double alpha, Sampler& rng) {
+    const double u = rng.next();
+    const double slope = alpha * std::sqrt(u / (1 - u));
+    const double cosine = 1 / std::sqrt(1 + slope * slope);
+    const Vec3 half = direction_about(normal, slope * cosine, cosine, 2 * pi * rng.next());
+    return (incident - half * (2 * incident.dot(half))).normalized();
+}
+
 BSDFEvaluation evaluate_principled(const Material& material, Vec3 view, const HitRecord& hit, Vec3 light) {
     const Vec3 normal = hit.normal;
     const Vec3 geometric = hit.front_face ? hit.outward_normal : hit.outward_normal * -1;
@@ -69,9 +77,51 @@ BSDFEvaluation evaluate_principled(const Material& material, Vec3 view, const Hi
     return {diffuse + fresnel_rgb * (distribution * visibility),
             (1 - p_spec) * cosine_pdf(normal, light) + p_spec * specular_pdf};
 }
+
+double coat_probability(const Material& m) { return 0.5 * m.coat_weight; }
+
+BSDFEvaluation evaluate_coated(const Material& m, Vec3 view, const HitRecord& hit, Vec3 light) {
+    const auto base = evaluate_principled(m, view, hit, light);
+    if (m.coat_weight == 0) return base;
+    const Vec3 n = hit.normal;
+    const double nv = n.dot(view), nl = n.dot(light);
+    const Vec3 geometric = hit.front_face ? hit.outward_normal : hit.outward_normal * -1;
+    if (nv <= 0 || nl <= 0 || geometric.dot(light) <= 0) return {};
+
+    const Vec3 half = (view + light).normalized();
+    const double nh = std::clamp(n.dot(half), 0.0, 1.0);
+    const double vh = std::clamp(view.dot(half), 0.0, 1.0);
+    if (vh == 0) return {};
+    const double alpha = std::max(0.001, m.coat_roughness * m.coat_roughness), a2 = alpha * alpha;
+    const double denom = (1 - nh) * (1 + nh) + a2 * nh * nh;
+    const double distribution = a2 / (pi * denom * denom);
+    const double visibility = 0.5 / (nl * std::sqrt(a2 + (1 - a2) * nv * nv)
+                                    + nv * std::sqrt(a2 + (1 - a2) * nl * nl));
+    const double coat = fresnel(vh, 1, m.coat_ior) * distribution * visibility;
+    const double transmission = (1 - fresnel(nv, 1, m.coat_ior)) * (1 - fresnel(nl, 1, m.coat_ior));
+    // Approximate a flat absorbing film. Refracted cosines set the path length;
+    // the substrate BRDF is evaluated in external directions (no refraction Jacobian
+    // or internal multiple reflections). Coat and base share the shading normal.
+    const auto internal_cosine = [&](double cosine) {
+        return std::sqrt(std::max(1e-12, 1 - (1 - cosine * cosine) / (m.coat_ior * m.coat_ior)));
+    };
+    const double distance = m.coat_thickness * (1 / internal_cosine(nv) + 1 / internal_cosine(nl));
+    const auto attenuation = [&](double sigma) {
+        return sigma == 0 ? 1.0 : std::exp(-sigma * distance);
+    };
+    const Vec3 absorption{attenuation(m.coat_absorption.x), attenuation(m.coat_absorption.y),
+                          attenuation(m.coat_absorption.z)};
+    const Vec3 base_scale = Vec3{1, 1, 1} * (1 - m.coat_weight)
+                            + absorption * (m.coat_weight * transmission);
+    const double q = coat_probability(m);
+    return {Vec3{coat, coat, coat} * m.coat_weight + multiply(base.value, base_scale),
+            q * distribution * nh / (4 * vh) + (1 - q) * base.pdf};
+}
 }
 
 BSDFEvaluation evaluate_bsdf(const Material& material, const Ray& incident, const HitRecord& hit, Vec3 direction) {
+    if (material.kind == Kind::coated)
+        return evaluate_coated(material, incident.direction.normalized() * -1, hit, direction);
     if (material.kind == Kind::principled)
         return evaluate_principled(material, incident.direction.normalized() * -1, hit, direction);
     if (!material.has_continuous_bsdf()) return {};
@@ -95,6 +145,17 @@ double Material::ior_at(Wavelength band) const {
 
 BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampler& rng, Wavelength band) {
     Vec3 d=ray.direction.normalized(),n=h.normal;
+    if (m.kind == Kind::coated) {
+        Material base = m;
+        base.kind = Kind::principled;
+        if (m.coat_weight == 0) return sample_bsdf(base, ray, h, rng, band);
+        const Vec3 wi = rng.next() < coat_probability(m)
+            ? sample_ggx(d, n, std::max(0.001, m.coat_roughness * m.coat_roughness), rng)
+            : sample_bsdf(base, ray, h, rng, band).direction;
+        const auto bsdf = evaluate_coated(m, d * -1, h, wi);
+        if (bsdf.pdf <= 0) return {wi, {}, 0, false};
+        return {wi, bsdf.value * (n.dot(wi) / bsdf.pdf), bsdf.pdf, false};
+    }
     if(m.kind==Kind::diffuse) {
         Vec3 wi = sample_cosine(n, rng);
         const double cosine = std::max(0.0, n.dot(wi));
@@ -103,11 +164,7 @@ BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampl
     if (m.kind == Kind::principled) {
         Vec3 wi;
         if (rng.next() < specular_probability(m)) {
-            const double u = rng.next();
-            const double slope = ggx_alpha(m, h.uv) * std::sqrt(u / (1 - u));
-            const double cosine = 1 / std::sqrt(1 + slope * slope);
-            const Vec3 half = direction_about(n, slope * cosine, cosine, 2 * pi * rng.next());
-            wi = (d - half * (2 * d.dot(half))).normalized();
+            wi = sample_ggx(d, n, ggx_alpha(m, h.uv), rng);
         } else {
             wi = sample_cosine(n, rng);
         }

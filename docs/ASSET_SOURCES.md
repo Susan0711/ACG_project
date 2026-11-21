@@ -81,3 +81,8 @@ The [HDR rotation scene](../scene/hdr_environment.json) uses an original unit sp
 `tests/scenes/forest_v05.cpp`: scene-only adaptation of original forest_v03 authored by Codex under user direction; no teammate contribution inferred. Uses asymmetric branch/foliage fans, clustered trees and shore boulders, patch-selected grass, per-board gable mapping. No external assets or licenses introduced.
 
 `assets/wood-soft-v05.ppm`: 256×256 ASCII P3 sRGB, derived from retained original wood.ppm by tools/generate_wood_v05.py. Channel contrast compressed to 25% around weathered cedar base (108,83,59); original file unchanged. UV repeats increase on scene geometry and gable is mapped per narrow board, reducing oversized grain. No photo source or URL; owner controls redistribution, no new license grant asserted. Existing studio-hdr.pfm reused unchanged.
+
+## B6 coated-material comparison
+
+`scene/coated_material.json`: comparison layout and material parameters authored by Codex at the user's request. Reuses the existing project-authored `studio-sphere.obj`, `studio-floor.obj` and `studio-hdr.pfm`; no new external mesh, texture or reference image. Left to right: bare Principled, clear coat, absorbing coat. Layered scattering background: https://pbr-book.org/4ed/Light_Transport_II_Volume_Rendering/Scattering_from_Layered_Materials ; the implemented model is an explicit single-scattering approximation, not copied PBRT source or its full layered solver.
+

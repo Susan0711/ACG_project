@@ -264,6 +264,7 @@ integrate(scene, ray, ...)
 | [mipmap_pier.json](scene/mipmap_pier.json) | 沿斜向延伸的栈桥看近、远两端的木纹。将 `boards.texture_filter` 在 `bilinear` 和 `mipmap` 间切换，可在同一机位比较固定原图与自适应选层。 |
 | [toon_shading.json](scene/toon_shading.json) | 点光源从左上方照亮橙色球体。将 `sphere.toon_bands` 从 4 改为 0，可对照同一球面的四档明暗与连续渐变。 |
 | [prism_dispersion.json](scene/prism_dispersion.json) | 透过 30° 玻璃棱镜观察白色狭缝。将 `prism.cauchy_b` 从 0 改为 0.04，可观察狭缝像分成三条色带。示例放大了色散系数，便于看清间距。 |
+| [coated_material.json](scene/coated_material.json) | 从左到右为裸基底、透明清漆和有色吸收清漆。调整涂层粗糙度与厚度，观察高光及下层衰减。 |
 | [tidewatch.json](scene/tidewatch.json) | 潮汐观测站将塔楼、码头、海面和帆船组合在一份 JSON 中。海面用带法线的波浪网格配合镜面材质，船的多个部件共用平移速度。 |
 
 ## 项目结构
@@ -337,3 +338,7 @@ docs/                    设计、素材来源与阶段记录
 ### B5：色散
 
 用 650、550、450 nm 分别代表红、绿、蓝光，以 `n(λ) = ior + cauchy_b × (1/λ² − 1/0.55²)` 计算折射率，公式中的 λ 以 μm 计。启用色散时，每个相机样本沿三个波长分别追踪，同一波长在棱镜的入射面和出射面使用同一折射率。蓝光折射率较高，经过两个不平行的棱面后比红光偏折更多，因此同一条白色狭缝在画面上形成位置不同的色带。
+
+### B6：多层材质
+
+`coated` 在 Principled 基底上增加介电 GGX 清漆层。`coat_ior` 和 `coat_roughness` 控制上层反射，`coat_thickness`（场景长度）与 `coat_absorption`（长度倒数）控制下层光经双程透射后的 RGB 吸收。采样使用两层的混合 PDF，兼容 MIS；`coat_weight: 0` 恢复原材质。当前为单次散射近似，不含层内多次反射和完整折射方向变换。

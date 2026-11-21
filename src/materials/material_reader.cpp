@@ -51,14 +51,29 @@ Material read_material(const nlohmann::json& entry, const std::filesystem::path&
         material.kind = Kind::emissive;
         material.color = json_fields::rgb(entry, "color");
         return material;
-    } else if (type == "diffuse" || type == "mirror" || type == "principled") {
+    } else if (type == "diffuse" || type == "mirror" || type == "principled" || type == "coated") {
         const bool textured = type != "mirror" && entry.contains("texture");
         const char* base_field = textured ? "texture" : "color";
-        if (type == "principled") {
-            json_fields::expect_fields(entry, {"type", base_field, "metallic", "roughness", "opacity", "opacity_map",
+        if (type == "principled" || type == "coated") {
+            // Validate the coat fields separately so Principled keeps its existing schema.
+            auto base_entry = entry;
+            if (type == "coated") {
+                for (const auto* key : {"coat_weight", "coat_ior", "coat_roughness", "coat_thickness", "coat_absorption"})
+                    base_entry.erase(key);
+                material.coat_weight = unit_parameter(entry, "coat_weight", material.coat_weight);
+                material.coat_roughness = unit_parameter(entry, "coat_roughness", material.coat_roughness);
+                material.coat_ior = json_fields::optional_number(entry, "coat_ior", material.coat_ior);
+                material.coat_thickness = json_fields::optional_number(entry, "coat_thickness", 0);
+                if (entry.contains("coat_absorption")) material.coat_absorption = json_fields::rgb(entry, "coat_absorption");
+                if (!std::isfinite(material.coat_ior) || material.coat_ior < 1 ||
+                    !std::isfinite(material.coat_thickness) || material.coat_thickness < 0 ||
+                    !finite(material.coat_absorption))
+                    throw std::runtime_error("Coat needs finite ior >= 1, thickness >= 0 and nonnegative absorption");
+            }
+            json_fields::expect_fields(base_entry, {"type", base_field, "metallic", "roughness", "opacity", "opacity_map",
                                               "normal_map", "normal_map_enabled", "roughness_map", "roughness_map_enabled",
                                               "texture_filter"});
-            material.kind = Kind::principled;
+            material.kind = type == "coated" ? Kind::coated : Kind::principled;
             material.metallic = unit_parameter(entry, "metallic", material.metallic);
             material.roughness = unit_parameter(entry, "roughness", material.roughness);
             material.normal_map = read_data_map(entry, "normal_map", scene_directory);

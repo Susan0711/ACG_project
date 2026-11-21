@@ -1,0 +1,22 @@
+{
+  "film": {"width": 720, "height": 360},
+  "camera": {"position": [0, 3.2, 11], "target": [0, 1, 0], "fov_degrees": 38},
+  "materials": {
+    "bare": {"type": "principled", "color": [0.65, 0.28, 0.12], "metallic": 0.45, "roughness": 0.55},
+    "clear": {"type": "coated", "color": [0.65, 0.28, 0.12], "metallic": 0.45, "roughness": 0.55,
+      "coat_ior": 1.5, "coat_roughness": 0.16, "coat_thickness": 0.5},
+    "tinted": {"type": "coated", "color": [0.65, 0.28, 0.12], "metallic": 0.45, "roughness": 0.55,
+      "coat_ior": 1.5, "coat_roughness": 0.16, "coat_thickness": 0.5, "coat_absorption": [0.1, 0.8, 2]},
+    "floor": {"type": "diffuse", "color": [0.18, 0.2, 0.24]}
+  },
+  "objects": [
+    {"mesh": "../assets/studio-sphere.obj", "position": [-2.3, 1, 0], "material": "bare"},
+    {"mesh": "../assets/studio-sphere.obj", "position": [0, 1, 0], "material": "clear"},
+    {"mesh": "../assets/studio-sphere.obj", "position": [2.3, 1, 0], "material": "tinted"},
+    {"mesh": "../assets/studio-floor.obj", "position": [0, 0, 0], "material": "floor"}
+  ],
+  "lights": [
+    {"type": "area", "origin": [-3, 5, 0], "u": [6, 0, 0], "v": [0, 0, 2], "radiance": [6, 6, 6]},
+    {"type": "environment", "map": "../assets/studio-hdr.pfm", "rotation_degrees": 65, "intensity": 0.5}
+  ]
+}
