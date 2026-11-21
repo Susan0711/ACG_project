@@ -21,6 +21,15 @@ std::shared_ptr<const Texture> read_texture(const nlohmann::json& entry, const c
     texture->load(directory / file, decode_srgb);
     return texture;
 }
+
+std::shared_ptr<const Texture> read_data_map(const nlohmann::json& entry, const char* field,
+                                             const std::filesystem::path& directory) {
+    const std::string toggle = std::string(field) + "_enabled";
+    const bool enabled = entry.value(toggle, true);
+    if (!entry.contains(field)) return {};
+    if (!entry.at(field).is_string()) throw std::runtime_error(std::string(field) + " must be a texture path");
+    return enabled ? read_texture(entry, field, directory, false) : nullptr;
+}
 }
 
 Material read_material(const nlohmann::json& entry, const std::filesystem::path& scene_directory) {
@@ -40,10 +49,13 @@ Material read_material(const nlohmann::json& entry, const std::filesystem::path&
         const bool textured = type != "mirror" && entry.contains("texture");
         const char* base_field = textured ? "texture" : "color";
         if (type == "principled") {
-            json_fields::expect_fields(entry, {"type", base_field, "metallic", "roughness", "opacity", "opacity_map"});
+            json_fields::expect_fields(entry, {"type", base_field, "metallic", "roughness", "opacity", "opacity_map",
+                                              "normal_map", "normal_map_enabled", "roughness_map", "roughness_map_enabled"});
             material.kind = Kind::principled;
             material.metallic = unit_parameter(entry, "metallic", material.metallic);
             material.roughness = unit_parameter(entry, "roughness", material.roughness);
+            material.normal_map = read_data_map(entry, "normal_map", scene_directory);
+            material.roughness_map = read_data_map(entry, "roughness_map", scene_directory);
         } else {
             json_fields::expect_fields(entry, {"type", base_field, "opacity", "opacity_map"});
             material.kind = type == "diffuse" ? Kind::diffuse : Kind::mirror;

@@ -101,7 +101,11 @@ cmake --build build-local --target path_tracer --parallel
 │       │   ├── "glass"             ior 为介质折射率，必须大于 0
 │       │   ├── "principled"        color 或 texture 二选一，作为底色
 │       │   │   ├── metallic        可选，金属度 [0, 1]，默认 0
-│       │   │   └── roughness       可选，粗糙度 [0, 1]，默认 0.5
+│       │   │   ├── roughness       可选，常量粗糙度 [0, 1]，默认 0.5
+│       │   │   ├── normal_map      可选，切线空间法线贴图（线性 P3 PPM，绿色正方向沿 +V）
+│       │   │   ├── normal_map_enabled     布尔值，提供路径时默认 true，false 使用模型着色法线
+│       │   │   ├── roughness_map   可选，线性 P3 PPM，以红通道覆盖该点的 roughness
+│       │   │   └── roughness_map_enabled  布尔值，提供路径时默认 true，false 使用常量 roughness
 │       │   └── "emissive"          color 为发射辐亮度 [r, g, b]，各通道 ≥ 0，可大于 1
 │       ├── opacity                 前四类可选，表面覆盖率在 [0, 1] 内，默认 1
 │       └── opacity_map             前四类可选，覆盖率贴图路径（P3 PPM）
@@ -252,6 +256,7 @@ integrate(scene, ray, ...)
 | [motion_blur.json](scene/motion_blur.json) | 相机固定，快门从 0 秒开到 1 秒。石头的 `velocity` 是 `[1.6, 0, 0]`，在射线时刻 `t` 按 `position + velocity × t` 定位。 |
 | [hdr_environment.json](scene/hdr_environment.json) | 左侧灰色漫反射球和右侧镜面球共用一个球体网格。将 `rotation_degrees` 从 0 改为 90，可观察受光方向和镜面倒影的移动。 |
 | [mis_sampling.json](scene/mis_sampling.json) | 小面光源与 HDR 天空共同照亮两颗球。固定 `--spp` 并切换 `--mode`，可观察三种策略的噪声差异。 |
+| [principled_maps.json](scene/principled_maps.json) | 面光源斜照一块平板。分别切换 `normal_map_enabled` 和 `roughness_map_enabled`，观察细条纹引起的高光偏转和两个宽分区的高光宽度。 |
 | [tidewatch.json](scene/tidewatch.json) | 潮汐观测站将塔楼、码头、海面和帆船组合在一份 JSON 中。海面用带法线的波浪网格配合镜面材质，船的多个部件共用平移速度。 |
 
 ## 项目结构
@@ -309,3 +314,7 @@ docs/                    设计、素材来源与阶段记录
 ### B1：Principled BSDF
 
 `metallic` 在带漫反射的非金属与有色金属反射之间插值。GGX 微表面反射使用 Schlick 菲涅耳和 Smith 遮蔽项，分布参数取 `max(roughness², 0.001)`。采样时在余弦加权的漫反射方向与 GGX 反射方向之间选择，用完整 BSDF 和混合 PDF 计算路径权重，并将同一 PDF 用于 MIS。
+
+### B2：法线贴图、粗糙度属性贴图
+
+两张贴图都按命中点的 UV 读取线性数据。法线贴图的 RGB 解码为切线空间方向，再按 UV 的朝向转换为着色法线，供直接光和反射采样共用。粗糙度贴图的红通道给出局部粗糙度，参与 GGX 求值与采样。两张图分别通过各自的 `_enabled` 字段开关。

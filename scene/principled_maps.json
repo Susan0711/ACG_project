@@ -1,0 +1,18 @@
+{
+  "film": { "width": 400, "height": 300 },
+  "camera": { "position": [0, 2.6, 2.15], "target": [0, 0, 0], "fov_degrees": 35 },
+  "materials": {
+    "panel": {
+      "type": "principled", "color": [0.72, 0.36, 0.15], "metallic": 0.55, "roughness": 0.35,
+      "normal_map": "../assets/ridges-normal.ppm", "normal_map_enabled": true,
+      "roughness_map": "../assets/bands-roughness.ppm", "roughness_map_enabled": true
+    }
+  },
+  "objects": [
+    { "mesh": "../assets/quad.obj", "position": [0, 0, 0], "material": "panel" }
+  ],
+  "lights": [
+    { "type": "area", "origin": [-1.1, 2.3, -2.4], "u": [1.8, 0, 0], "v": [0, 0, 0.8], "radiance": [9, 9, 9] },
+    { "type": "environment", "map": "../assets/studio-hdr.pfm", "intensity": 0.18 }
+  ]
+}

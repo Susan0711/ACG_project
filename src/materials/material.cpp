@@ -20,8 +20,9 @@ Vec3 sample_cosine(Vec3 normal, Sampler& rng) {
     return direction_about(normal, std::sqrt(u), std::sqrt(1 - u), 2 * pi * rng.next());
 }
 
-double ggx_alpha(const Material& material) {
-    return std::max(0.001, material.roughness * material.roughness);
+double ggx_alpha(const Material& material, UV uv) {
+    const double roughness = material.roughness_at(uv);
+    return std::max(0.001, roughness * roughness);
 }
 
 double specular_probability(const Material& material) {
@@ -38,7 +39,7 @@ BSDFEvaluation evaluate_principled(const Material& material, Vec3 view, const Hi
     const double nh = std::clamp(normal.dot(half), 0.0, 1.0);
     const double vh = std::clamp(view.dot(half), 0.0, 1.0);
     if (vh == 0) return {};
-    const double alpha = ggx_alpha(material), a2 = alpha * alpha;
+    const double alpha = ggx_alpha(material, hit.uv), a2 = alpha * alpha;
     const double denominator = (1 - nh) * (1 + nh) + a2 * nh * nh;
     const double distribution = a2 / (pi * denominator * denominator);
     // Height-correlated Smith masking/shadowing divided by 4 (n.v) (n.l).
@@ -84,7 +85,7 @@ BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampl
         Vec3 wi;
         if (rng.next() < specular_probability(m)) {
             const double u = rng.next();
-            const double slope = ggx_alpha(m) * std::sqrt(u / (1 - u));
+            const double slope = ggx_alpha(m, h.uv) * std::sqrt(u / (1 - u));
             const double cosine = 1 / std::sqrt(1 + slope * slope);
             const Vec3 half = direction_about(n, slope * cosine, cosine, 2 * pi * rng.next());
             wi = (d - half * (2 * d.dot(half))).normalized();

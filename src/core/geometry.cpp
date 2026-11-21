@@ -1,6 +1,36 @@
 #include "core/geometry.h"
 namespace { bool valid(const Ray& r,double lo,double hi) { auto f=[](Vec3 v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);};return std::isfinite(r.time)&&f(r.origin)&&f(r.direction)&&!std::isnan(lo)&&!std::isnan(hi)&&lo<=hi;} }
 
+namespace {
+Vec3 from_tangent_space(const HitRecord& hit, Vec3 tangent, double handedness, Vec3 local) {
+    // Build the UV frame on the outward-facing shading normal, then orient the result to the hit side.
+    const Vec3 n = hit.front_face ? hit.normal : hit.normal * -1;
+    tangent = (tangent - n * n.dot(tangent)).normalized();
+    if (tangent.dot(tangent) == 0) return hit.normal;
+    const Vec3 bitangent = n.cross(tangent) * handedness;
+    const Vec3 mapped = (tangent * local.x + bitangent * local.y + n * local.z).normalized();
+    if (mapped.dot(hit.outward_normal) <= 0) return hit.normal;
+    return hit.front_face ? mapped : mapped * -1;
+}
+}
+
+Vec3 Triangle::mapped_normal(const HitRecord& hit, Vec3 local) const {
+    if (!has_complete_uvs) return hit.normal;
+    const double du1 = tb.u - ta.u, dv1 = tb.v - ta.v;
+    const double du2 = tc.u - ta.u, dv2 = tc.v - ta.v;
+    const double det = du1 * dv2 - du2 * dv1;
+    if (std::abs(det) <= 1e-12 * (std::abs(du1 * dv2) + std::abs(du2 * dv1))) return hit.normal;
+    const double handedness = det < 0 ? -1 : 1;
+    const Vec3 tangent = ((b - a) * dv2 - (c - a) * dv1) * handedness;
+    return from_tangent_space(hit, tangent, handedness, local);
+}
+
+Vec3 Sphere::mapped_normal(const HitRecord& hit, Vec3 local) const {
+    // U increases with longitude; V increases toward +Y in Sphere::intersect.
+    const Vec3 tangent{-hit.outward_normal.z, 0, hit.outward_normal.x};
+    return from_tangent_space(hit, tangent, -1, local);
+}
+
 bool Sphere::intersect(const Ray& ray, double lo, double hi, HitRecord& hit) const {
     if (!valid(ray,lo,hi)) return false;
     const Vec3 oc = ray.origin-center_at(ray.time);

@@ -14,6 +14,9 @@ struct Material {
     std::shared_ptr<const Texture> opacity_map{};
     double metallic = 0;
     double roughness = 0.5;
+    std::shared_ptr<const Texture> normal_map{};
+    std::shared_ptr<const Texture> roughness_map{};
+    double roughness_at(UV uv) const { return roughness_map ? roughness_map->value(uv).x : roughness; }
     bool has_continuous_bsdf() const { return kind == Kind::diffuse || kind == Kind::principled; }
     bool is_emitter() const { return kind == Kind::emissive; }
     double alpha(UV uv) const;

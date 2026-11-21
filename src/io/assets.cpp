@@ -57,14 +57,17 @@ void load_obj(Scene& scene, const std::filesystem::path& path, int material,
                 if(!(row>>vertices[0]>>vertices[1]>>vertices[2]) || row>>extra) throw std::runtime_error("Only triangular faces supported");
                 Vec3 p[3]; UV uv[3];
                 std::array<Vec3, 3> face_normals{};
-                int normal_count = 0;
+                int normal_count = 0, uv_count = 0;
                 for(int i=0;i<3;++i) {
                     std::string s=vertices[i]; auto slash=s.find('/');
                     p[i]=positions.at(index(s.substr(0,slash),positions.size()));
                     if(slash!=std::string::npos) {
                         auto second=s.find('/',slash+1);
                         auto t=s.substr(slash+1,second==std::string::npos?second:second-slash-1);
-                        if(!t.empty()) uv[i]=texcoords.at(index(t,texcoords.size()));
+                        if(!t.empty()) {
+                            uv[i]=texcoords.at(index(t,texcoords.size()));
+                            ++uv_count;
+                        }
                         if(second!=std::string::npos) {
                             face_normals[i] = normals.at(index(s.substr(second+1), normals.size()));
                             ++normal_count;
@@ -73,6 +76,7 @@ void load_obj(Scene& scene, const std::filesystem::path& path, int material,
                     }
                 }
                 Triangle t{p[0],p[1],p[2],material,uv[0],uv[1],uv[2]};
+                t.has_complete_uvs = uv_count == 3;
                 if (normal_count == 3) t.corner_normals = face_normals;
                 t.velocity = velocity;
                 if((t.b-t.a).cross(t.c-t.a).dot((t.b-t.a).cross(t.c-t.a))==0) throw std::runtime_error("Degenerate face");

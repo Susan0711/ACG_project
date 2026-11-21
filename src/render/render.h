@@ -19,7 +19,9 @@ public:
     double visibility_to_light(const Ray& shadow, double distance) const;
 
 private:
+    bool intersect_geometry(const Ray&, double minimum, double maximum, HitRecord&) const;
     double surface_transmittance(const Ray&, double t_max) const;
     World world_;
     std::optional<BVH> bvh_;
+    bool has_normal_maps_;
 };

@@ -12,6 +12,7 @@ struct Sphere {
     Vec3 velocity{};
     Vec3 center_at(double time) const { return center + velocity*time; }
     bool intersect(const Ray&, double t_min, double t_max, HitRecord&) const;
+    Vec3 mapped_normal(const HitRecord&, Vec3 tangent_space_normal) const;
 };
 struct Triangle {
     Vec3 a, b, c;
@@ -20,7 +21,9 @@ struct Triangle {
     int light_id=-1;
     Vec3 velocity{};  // Uniform world-space translation per second; vertices are stored at time zero.
     std::optional<std::array<Vec3, 3>> corner_normals{};
+    bool has_complete_uvs = true;
     bool intersect(const Ray&, double t_min, double t_max, HitRecord&) const;
+    Vec3 mapped_normal(const HitRecord&, Vec3 tangent_space_normal) const;
 };
 struct Scene {
     std::vector<std::variant<Sphere, Triangle>> objects;
