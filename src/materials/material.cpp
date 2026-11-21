@@ -86,7 +86,14 @@ double fresnel(double c,double ei,double et) {
     double ct=std::sqrt(1-st2),rs=(ei*c-et*ct)/(ei*c+et*ct),rp=(et*c-ei*ct)/(et*c+ei*ct);
     return (rs*rs+rp*rp)*0.5;
 }
-BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampler& rng) {
+double Material::ior_at(Wavelength band) const {
+    if (cauchy_b == 0 || band == Wavelength::green) return ior;
+    const double lambda = static_cast<int>(band) * 0.001;
+    constexpr double reference = 0.55;
+    return ior + cauchy_b * (1 / (lambda * lambda) - 1 / (reference * reference));
+}
+
+BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampler& rng, Wavelength band) {
     Vec3 d=ray.direction.normalized(),n=h.normal;
     if(m.kind==Kind::diffuse) {
         Vec3 wi = sample_cosine(n, rng);
@@ -111,7 +118,9 @@ BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampl
     Vec3 reflection=(d-n*(2*d.dot(n))).normalized();
     if(m.kind==Kind::mirror)return {reflection,m.color,1,true};
     if(m.kind==Kind::glass) {
-        double ei=h.front_face?1:m.ior,et=h.front_face?m.ior:1,eta=ei/et,c=std::clamp(-d.dot(n),0.0,1.0),f=fresnel(c,ei,et);
+        const double index = m.ior_at(band);
+        const double ei = h.front_face ? 1 : index, et = h.front_face ? index : 1;
+        const double eta = ei / et, c = std::clamp(-d.dot(n), 0.0, 1.0), f = fresnel(c, ei, et);
         if(rng.next()<f)return {reflection,{1,1,1},f,true};
         Vec3 perpendicular=(d+n*c)*eta;
         Vec3 transmission=(perpendicular-n*std::sqrt(std::max(0.0,1-perpendicular.dot(perpendicular)))).normalized();

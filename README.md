@@ -99,7 +99,9 @@ cmake --build build-local --target path_tracer --parallel
 │       │   │   ├── texture         颜色贴图路径（P3 PPM），按 UV 读取反照率
 │       │   │   └── toon_bands      可选整数。0（默认）为连续明暗，2 或更大为明暗档数，包含最暗档和最亮档
 │       │   ├── "mirror"            color 为镜面反射率 [r, g, b]，各通道在 [0, 1] 内
-│       │   ├── "glass"             ior 为介质折射率，必须大于 0
+│       │   ├── "glass"             理想玻璃
+│       │   │   ├── ior             550 nm 绿光的折射率，必须大于 0
+│       │   │   └── cauchy_b        可选，柯西色散系数（μm²）。默认 0 为普通玻璃，正值使蓝光折射率高于红光，三个通道的折射率都须为正
 │       │   ├── "principled"        color 或 texture 二选一，作为底色
 │       │   │   ├── metallic        可选，金属度 [0, 1]，默认 0
 │       │   │   ├── roughness       可选，常量粗糙度 [0, 1]，默认 0.5
@@ -261,6 +263,7 @@ integrate(scene, ray, ...)
 | [principled_maps.json](scene/principled_maps.json) | 面光源斜照一块平板。分别切换 `normal_map_enabled` 和 `roughness_map_enabled`，观察细条纹引起的高光偏转和两个宽分区的高光宽度。 |
 | [mipmap_pier.json](scene/mipmap_pier.json) | 沿斜向延伸的栈桥看近、远两端的木纹。将 `boards.texture_filter` 在 `bilinear` 和 `mipmap` 间切换，可在同一机位比较固定原图与自适应选层。 |
 | [toon_shading.json](scene/toon_shading.json) | 点光源从左上方照亮橙色球体。将 `sphere.toon_bands` 从 4 改为 0，可对照同一球面的四档明暗与连续渐变。 |
+| [prism_dispersion.json](scene/prism_dispersion.json) | 透过 30° 玻璃棱镜观察白色狭缝。将 `prism.cauchy_b` 从 0 改为 0.04，可观察狭缝像分成三条色带。示例放大了色散系数，便于看清间距。 |
 | [tidewatch.json](scene/tidewatch.json) | 潮汐观测站将塔楼、码头、海面和帆船组合在一份 JSON 中。海面用带法线的波浪网格配合镜面材质，船的多个部件共用平移速度。 |
 
 ## 项目结构
@@ -330,3 +333,7 @@ docs/                    设计、素材来源与阶段记录
 ### B4：卡通风格渲染
 
 漫反射材质将着色法线与光照方向的夹角余弦舍入到最近的亮度档位。四档对应 0、1/3、2/3 和 1。直接光求值和散射采样共用这一响应，光源衰减与阴影透射率仍按场景计算。
+
+### B5：色散
+
+用 650、550、450 nm 分别代表红、绿、蓝光，以 `n(λ) = ior + cauchy_b × (1/λ² − 1/0.55²)` 计算折射率，公式中的 λ 以 μm 计。启用色散时，每个相机样本沿三个波长分别追踪，同一波长在棱镜的入射面和出射面使用同一折射率。蓝光折射率较高，经过两个不平行的棱面后比红光偏折更多，因此同一条白色狭缝在画面上形成位置不同的色带。

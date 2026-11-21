@@ -11,6 +11,7 @@ public:
     explicit RenderScene(World world, Acceleration backend = Acceleration::bvh, BVHSplit split = BVHSplit::median);
     const Camera& camera() const { return world_.camera; }
     bool uses_mipmaps() const { return has_mipmaps_; }
+    bool uses_dispersion() const { return has_dispersion_; }
     const Lighting& lights() const { return world_.lights; }
     const HomogeneousMedium& medium() const { return world_.medium; }
     const Material& material(const HitRecord& hit) const { return world_.materials.at(hit.material_id); }
@@ -26,4 +27,5 @@ private:
     std::optional<BVH> bvh_;
     bool has_normal_maps_;
     bool has_mipmaps_;
+    bool has_dispersion_;
 };

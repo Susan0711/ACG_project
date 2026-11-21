@@ -5,6 +5,7 @@
 #include <memory>
 
 enum class Kind { diffuse, mirror, glass, emissive, principled };
+enum class Wavelength { red = 650, green = 550, blue = 450 };  // Representative wavelengths in nm.
 struct Material {
     Kind kind = Kind::diffuse;
     Vec3 color{0.75,0.75,0.75};
@@ -17,6 +18,8 @@ struct Material {
     std::shared_ptr<const Texture> normal_map{};
     std::shared_ptr<const Texture> roughness_map{};
     int toon_bands = 0;  // Diffuse only. Zero keeps the Lambertian cosine response.
+    double cauchy_b = 0;  // Glass only, in square micrometers. ior is the index at 550 nm.
+    double ior_at(Wavelength) const;
     double roughness_at(UV uv) const { return roughness_map ? roughness_map->value(uv).x : roughness; }
     bool has_continuous_bsdf() const { return kind == Kind::diffuse || kind == Kind::principled; }
     bool is_emitter() const { return kind == Kind::emissive; }
@@ -29,7 +32,7 @@ struct BSDFSample {
     bool delta;
 };
 double fresnel(double cosine,double eta_i,double eta_t);
-BSDFSample sample_bsdf(const Material&,const Ray&,const HitRecord&,Sampler&);
+BSDFSample sample_bsdf(const Material&,const Ray&,const HitRecord&,Sampler&, Wavelength = Wavelength::green);
 
 // For continuous scattering, value is f and pdf is a density per steradian.
 // Ideal mirror and dielectric events have discrete probabilities in BSDFSample.

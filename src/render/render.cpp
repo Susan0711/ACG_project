@@ -28,6 +28,8 @@ RenderScene::RenderScene(World world, Acceleration backend, BVHSplit split) : wo
                                    [](const Material& m) { return bool(m.normal_map); });
     has_mipmaps_ = std::any_of(world_.materials.begin(), world_.materials.end(),
                                [](const Material& m) { return m.texture && m.texture->last_level() > 0; });
+    has_dispersion_ = std::any_of(world_.materials.begin(), world_.materials.end(),
+                                  [](const Material& m) { return m.kind == Kind::glass && m.cauchy_b > 0; });
     if (backend == Acceleration::bvh) {
         bvh_.emplace().build(world_.scene, camera.shutter_open, camera.shutter_close, split);
     }

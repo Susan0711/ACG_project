@@ -38,10 +38,14 @@ Material read_material(const nlohmann::json& entry, const std::filesystem::path&
     const auto type = entry.at("type").get<std::string>();
     Material material;
     if (type == "glass") {
-        json_fields::expect_fields(entry, {"type", "ior", "opacity", "opacity_map"});
+        json_fields::expect_fields(entry, {"type", "ior", "cauchy_b", "opacity", "opacity_map"});
         material.kind = Kind::glass;
         material.ior = json_fields::number(entry.at("ior"), "ior");
-        if (material.ior <= 0) throw std::runtime_error("ior must be positive");
+        if (!std::isfinite(material.ior) || material.ior <= 0) throw std::runtime_error("ior must be finite and positive");
+        material.cauchy_b = json_fields::optional_number(entry, "cauchy_b", 0);
+        if (!std::isfinite(material.cauchy_b) || material.cauchy_b < 0 ||
+            material.ior_at(Wavelength::red) <= 0 || !std::isfinite(material.ior_at(Wavelength::blue)))
+            throw std::runtime_error("cauchy_b must be nonnegative and give finite positive RGB refractive indices");
     } else if (type == "emissive") {
         json_fields::expect_fields(entry, {"type", "color"});
         material.kind = Kind::emissive;

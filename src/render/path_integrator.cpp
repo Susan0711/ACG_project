@@ -5,7 +5,8 @@
 #include <limits>
 #include <stdexcept>
 
-Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, SamplingMode mode) {
+namespace {
+Vec3 trace_path(const RenderScene& scene, Ray ray, Sampler& rng, int depth, SamplingMode mode, Wavelength band) {
     constexpr double infinity = std::numeric_limits<double>::infinity();
     Vec3 result{}, throughput{1, 1, 1};
     Vec3 previous_position{};
@@ -59,7 +60,7 @@ Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, Sampl
 
             const Vec3 direct = direct_lighting(scene, ray, hit, material, rng, mode);
             result = result + multiply(throughput, direct);
-            const auto sampled = sample_bsdf(material, ray, hit, rng);
+            const auto sampled = sample_bsdf(material, ray, hit, rng, band);
             if (sampled.pdf <= 0) break;
             throughput = multiply(throughput, sampled.weight);
             previous_delta = sampled.delta;
@@ -80,4 +81,15 @@ Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, Sampl
         ++bounce;
     }
     return result;
+}
+}
+
+Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, SamplingMode mode) {
+    if (!scene.uses_dispersion()) return trace_path(scene, ray, rng, depth, mode, Wavelength::green);
+    // Use the same camera ray and random sequence so achromatic paths agree across RGB.
+    Sampler red_rng = rng, blue_rng = rng;
+    const double red = trace_path(scene, ray, red_rng, depth, mode, Wavelength::red).x;
+    const double green = trace_path(scene, ray, rng, depth, mode, Wavelength::green).y;
+    const double blue = trace_path(scene, ray, blue_rng, depth, mode, Wavelength::blue).z;
+    return {red, green, blue};
 }

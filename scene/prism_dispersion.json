@@ -1,0 +1,15 @@
+{
+  "film": {"width": 420, "height": 280},
+  "camera": {"position": [0, 1.6, 6.2], "target": [0, 0, 0], "fov_degrees": 25},
+  "materials": {
+    "prism": {"type": "glass", "ior": 1.52, "cauchy_b": 0.04}
+  },
+  "objects": [
+    {"mesh": "../assets/dispersion-prism.obj", "position": [0, 0, 0], "material": "prism"}
+  ],
+  "lights": [
+    {"type": "area", "origin": [2.04, -6, -6], "u": [0.14, 0, 0], "v": [0, 9, 0], "radiance": [3, 3, 3]},
+    {"type": "area", "origin": [-12, -12, -7], "u": [24, 0, 0], "v": [0, 24, 0], "radiance": [0.09, 0.09, 0.09]},
+    {"type": "area", "origin": [-15, 1.65, -11], "u": [30, 0, 0], "v": [0, 0, 12], "radiance": [0.42, 0.42, 0.42]}
+  ]
+}
