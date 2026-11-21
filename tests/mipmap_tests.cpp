@@ -36,12 +36,12 @@ void check_pyramid() {
     check(close(tex.value({0, 0.75}).x, 1), "Default preserves the point-sampled baseline");
 }
 
-void check_pier() {
+void check_pier(Acceleration backend, BVHSplit split) {
     World world = load_scene_file("scene/mipmap_pier.json");
     check(world.materials.front().texture->last_level() == 8, "Pier wood keeps levels 0 through 8");
     const Camera camera = world.camera;
     const double spread = 2 * std::tan(camera.fov * pi / 360) / world.film_size.height;
-    const RenderScene scene(std::move(world));
+    const RenderScene scene(std::move(world), backend, split);
     const auto wood_hit = [&](const Ray& ray) {
         HitRecord hit;
         check(scene.intersect(ray, 0, 100, hit) && hit.outward_normal.y > 0.999, "Hit top of pier board");
@@ -67,11 +67,19 @@ void check_pier() {
           "Direct lighting and BSDF sampling use the selected level");
 
     const auto camera_lod = [&](double z, double pixel_spread) {
-        const Vec3 direction = (Vec3{0, 0.095, z} - camera.origin).normalized();
-        return wood_hit({camera.origin, direction, 0, {0, pixel_spread}}).albedo_lod;
+        const Vec3 target{0, 0.095, z};
+        const Vec3 direction = (target - camera.origin).normalized();
+        const HitRecord hit = wood_hit({camera.origin, direction, 0, {0, pixel_spread}});
+        const Vec3 error = hit.position - target;
+        check(error.dot(error) < 1e-20, "Camera probe reaches the intended board top without occlusion");
+        return hit.albedo_lod;
     };
-    const double near_lod = camera_lod(0.2, spread), far_lod = camera_lod(-5.2, spread);
-    check(far_lod > near_lod + 2 && close(camera_lod(-5.2, spread / 2), far_lod - 1),
+    // Board centers lie on the shared diagonal of the two top triangles. At a
+    // grazing angle, rounding can reject both triangles there and hit a side
+    // of the next board instead. Probe visible interiors, away from this seam.
+    constexpr double near_z = 0.22, far_z = -5.18;
+    const double near_lod = camera_lod(near_z, spread), far_lod = camera_lod(far_z, spread);
+    check(far_lod > near_lod + 2 && close(camera_lod(far_z, spread / 2), far_lod - 1),
           "Distant boards use coarser levels; doubling resolution restores one detail level");
     std::cout << "pier LOD at 480x320: near=" << near_lod << " far=" << far_lod << '\n';
 }
@@ -80,7 +88,9 @@ void check_pier() {
 int main() {
     try {
         check_pyramid();
-        check_pier();
+        check_pier(Acceleration::linear, BVHSplit::median);
+        check_pier(Acceleration::bvh, BVHSplit::median);
+        check_pier(Acceleration::bvh, BVHSplit::sah);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
