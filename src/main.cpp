@@ -1,6 +1,7 @@
 #include "render_scene.h"
 #include "scene_init.h"
-#include "render/wavefront.h"
+#include "render/wavefront_cuda.h"
+#include <cstdlib>
 #include <charconv>
 #include <chrono>
 #include <exception>
@@ -104,17 +105,20 @@ int main(int argc, char** argv) {
 
 #ifdef ACG_CUDA
         std::unique_ptr<CudaBVH> gpu;
+        std::unique_ptr<CudaWavefront> wavefront;
+        const bool profile = std::getenv("ACG_CUDA_PROFILE") != nullptr;
         if (options.gpu.value_or(false)) {
             const auto upload = std::chrono::steady_clock::now();
             gpu = std::make_unique<CudaBVH>(scene.bvh(), scene.geometry(), scene.materials());
+            wavefront = std::make_unique<CudaWavefront>(scene,*gpu);
             std::cout << "gpu_prepare_seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now()-upload).count() << '\n';
         }
-        QueueStats queue;
+        DeviceRenderStats queue;
         const int threshold = options.refill_threshold.value_or(CudaBVH::capacity/4);
 #endif
         const auto start = std::chrono::steady_clock::now();
 #ifdef ACG_CUDA
-        if (gpu) queue = render_wavefront(scene, film, settings, *gpu, threshold);
+        if (wavefront) queue = wavefront->render(film,settings,threshold,profile);
         else
 #endif
             render(scene, film, settings);
@@ -125,11 +129,15 @@ int main(int argc, char** argv) {
 
 #ifdef ACG_CUDA
         if (gpu) {
-            const auto timing = gpu->stats();
             std::cout << "gpu_refill_threshold=" << threshold << " capacity=" << CudaBVH::capacity
                       << " peak_active=" << queue.peak_paths << " refills=" << queue.refills
-                      << " queries=" << timing.queries << " batches=" << timing.batches
-                      << " kernel_ms=" << timing.kernel_ms << " batch_ms=" << timing.batch_ms << '\n';
+                      << " main_queries=" << queue.main_queries << " shadow_slots=" << queue.shadow_slots
+                      << " rounds=" << queue.rounds << " control_d2h_bytes=" << queue.control_bytes
+                      << " film_d2h_bytes=" << queue.film_bytes << '\n';
+            if (profile) {
+                const char* names[]={"queue","closest","shade_light","visibility","resolve_advance","film"};
+                for (int i=0;i<6;++i) std::cout << "gpu_" << names[i] << "_ms=" << queue.stage_ms[i] << '\n';
+            }
         }
 #endif
         const char* output_path = "path.ppm";

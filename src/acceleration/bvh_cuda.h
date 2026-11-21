@@ -2,6 +2,7 @@
 #include "acceleration/bvh.h"
 #include <memory>
 struct Material;
+namespace fp32 { struct Ray; struct Hit; struct GeometryView; }
 
 struct RayQuery {
     Vec3 origin, direction;
@@ -27,6 +28,10 @@ public:
         double kernel_ms = 0, batch_ms = 0;
     };
     Statistics stats() const;
+    Vec3 coordinate_origin() const;
+    fp32::GeometryView device_geometry() const;
+    void intersect_device(const fp32::Ray*, fp32::Hit*, int count) const;
+    void shadow_device(const fp32::Ray*, float*, int count) const;
 private:
     struct Storage;
     std::unique_ptr<Storage> storage_;

@@ -24,6 +24,7 @@ public:
     Vec3 background{};
     std::shared_ptr<const Environment> hdr;
     std::vector<PointLight> points;
+    const std::vector<AreaLight>& areas() const { return areas_; }
 
     BackgroundLight escape(Vec3 direction) const;
     double emitter_pdf(int light_id, Vec3 from, Vec3 to) const;

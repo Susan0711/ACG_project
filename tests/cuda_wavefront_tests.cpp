@@ -1,4 +1,4 @@
-#include "render/wavefront.h"
+#include "render/wavefront_cuda.h"
 #include "scene_init.h"
 #include <algorithm>
 #include <cmath>
@@ -91,19 +91,24 @@ void check_shadow_segments(Texture::Filter filter) {
             throw std::runtime_error("GPU shadow segment differs at index "+std::to_string(i));
     }
 }
-void compare_frame(const char* file, int spp) {
-    RenderScene scene(load_scene_file(file), Acceleration::bvh, BVHSplit::sah);
+void compare_frame(const char* file, int spp, SamplingMode mode=SamplingMode::mis, bool extra_lights=false) {
+    auto world=load_scene_file(file);
+    if (extra_lights) {
+        for (int i=0;i<6;++i) world.lights.points.push_back({{double(i)-3,4,2},{1,2,1}});
+    }
+    RenderScene scene(std::move(world), Acceleration::bvh, BVHSplit::sah);
     CudaBVH gpu(scene.bvh(), scene.geometry(), scene.materials());
     RenderSettings settings;
     settings.threads = 4;
     settings.spp = spp;
-    settings.mode = SamplingMode::mis;
+    settings.mode = mode;
     Film cpu(67,37);
     render(scene, cpu, settings);
+    CudaWavefront wavefront(scene,gpu);
     Film first(cpu.width,cpu.height);
     for (int threshold : {0, CudaBVH::capacity/4}) {
         Film device(cpu.width, cpu.height);
-        const auto queue = render_wavefront(scene, device, settings, gpu, threshold);
+        const auto queue = wavefront.render(device,settings,threshold);
         if (spp == 16 && queue.refills < 2) throw std::runtime_error("Expected multiple camera refills");
         double error = 0, energy = 0;
         int large_differences = 0;
@@ -135,6 +140,15 @@ int main() {
         compare_frame("scene/volume_alpha_shadow.json", 16);
         compare_frame("scene/prism_dispersion.json", 2);
         compare_frame("scene/motion_blur.json", 2);
+        compare_frame("scene/volume_alpha_shadow.json", 3, SamplingMode::nee, true);
+        compare_frame("scene/mis_sampling.json", 4, SamplingMode::bsdf);
+        compare_frame("scene/coated_material.json", 4);
+        compare_frame("scene/height_fog.json", 4);
+        compare_frame("scene/principled_maps.json", 4);
+        compare_frame("scene/hdr_environment.json", 4);
+        compare_frame("scene/mipmap_pier.json", 4);
+        compare_frame("scene/toon_shading.json", 4);
+        compare_frame("scene/depth_of_field.json", 4);
         std::cout << "CPU/GPU linear frames agree at both refill thresholds\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

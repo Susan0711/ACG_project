@@ -350,7 +350,7 @@ docs/                    设计、素材来源与阶段记录
 
 ## GPU render
 
-CPU 后端使用 FP64。启用 `--backend=gpu` 后，GPU 使用 FP32 计算 BVH 求交和阴影段的表面透射率。CPU 使用 FP64 建树、计算光照与介质衰减并累加像素。
+CPU 后端使用 FP64。当前 `--backend=gpu` 使用 C3：CPU 加载场景、建立 SAH BVH 并写 PPM，GPU 使用 FP32 生成相机样本、推进路径、着色、求阴影透射率并累加线性 RGB。随机数状态使用 64 位整数。
 
 ### C1：单独针对 BVH intersection 的 kernel
 
@@ -371,7 +371,7 @@ mkdir -p compare/cpu compare/gpu
 (cd compare/gpu && ../../build-cuda/path_tracer --scene ../../scene/tidewatch.json --backend=gpu --width 160 --height 90 --spp 32 --threads 8 --mode mis)
 ```
 
-GPU 日志记录准备显存的 `gpu_prepare_seconds` 和完整渲染的 `render_seconds`。`kernel_ms` 累计各批 CUDA 工作区间，C2 包含主射线求交和阴影可见性查询。`batch_ms` 还包含打包、传输和回收结果。这两项均包含在渲染区间中。`queries` 统计主机提交的射线条目，`batches` 统计提交批次。
+C2 版本的 GPU 日志记录准备显存的 `gpu_prepare_seconds` 和完整渲染的 `render_seconds`。`kernel_ms` 累计各批 CUDA 工作区间，C2 包含主射线求交和阴影可见性查询。`batch_ms` 还包含打包、传输和回收结果。这两项均包含在渲染区间中。`queries` 统计主机提交的射线条目，`batches` 统计提交批次。
 
 #### FP64 转 FP32 时遇到的一个小问题
 
@@ -382,3 +382,11 @@ GPU 日志记录准备显存的 `gpu_prepare_seconds` 和完整渲染的 `render
 CPU 将起点、方向、快门时间和到光源的距离区间一次交给 GPU。一个 CUDA 线程负责一条阴影段，一次遍历最多收集最近的 8 层，按距离累乘 `T *= 1 - alpha`。遇到完全遮挡就返回 0，穿过 8 层后仍有剩余区间则继续遍历。CPU 每段只接收一个 FP32 表面透射率，再乘上介质透射率并累加该光源的贡献。C2 随 `--backend=gpu` 启用，沿用 C1 的补队列阈值。[阴影遍历](src/acceleration/bvh_cuda.cu) · [不透明度采样](src/acceleration/shadow_fp32.cuh)
 
 在 RTX 5090 上回放高山湖的 76,319 条阴影段，与 C1 相比，最大表面透射率差约为 8.96 × 10⁻⁸。固定阈值 24,576，增强版（384 × 256、32 spp、SAH、MIS、8 个 CPU 线程）三次运行的渲染中位数从 34.64 秒降至 28.97 秒，启动到出图从 51.66 秒降至 45.74 秒。两版输出的 8 位 RGB 图逐像素一致。
+
+### C3：路径状态常驻显存的 wavefront 渲染
+
+每次最多追踪 32,768 个样本路径，沿用 16 × 16 图块取样顺序和 `--gpu-refill-threshold`。GPU 根据主射线的最近命中处理雾、表面和天空，再依次生成各光源的阴影段。每组最多处理四个光源，每个线程为一条路径按光源顺序结算贡献。轮盘赌和透明穿过也在 GPU 上执行。色散使用同一相机样本和初始随机序列追踪三个波段。每条路径持有自己的随机数状态，完成的样本按固定顺序累加。[设备场景](src/render/device_scene.cu) · [渲染循环](src/render/wavefront_cuda.cu)
+
+CPU 每轮读回三个 32 位队列统计值，最后一次下载线性 RGB，再由原有 Film 完成色调映射和写盘。`render_seconds` 包含队列分配及最终图像读回；`gpu_prepare_seconds` 记录静态场景上传。`main_queries` 是实际主射线数，`shadow_slots` 包含本批按光源预留的空槽。单独在 Linux 命令前设置 `ACG_CUDA_PROFILE=1` 可输出各 CUDA 阶段的累计毫秒数。正式速度对照使用未开启阶段计时的进程。
+
+在同一台 RTX 5090 上用 SAH、MIS、32 spp 和阈值 24,576 各交替跑三次。高山湖增强版（384 × 256）的渲染中位数从 C2 的 28.66 秒降到 8.39 秒，启动到出图从 46.09 秒降到 25.60 秒。与 C2 的 8 位图比较，PSNR 为 49.20 dB；与同种子的 CPU FP64 图比较为 56.04 dB。三个种子下，C3 的平均线性 RGB 均比 C2 高约 0.15%。

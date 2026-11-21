@@ -191,6 +191,7 @@ __global__ void shadow_segments(DeviceBVH tree, fp32::ShadowData data, const fp3
 struct CudaBVH::Storage {
     Vec3 origin{};
     DeviceBuffer<fp32::Node> nodes;
+    DeviceBuffer<int> shape_index;
     DeviceBuffer<fp32::Triangle> triangles;
     DeviceBuffer<fp32::Sphere> spheres;
     DeviceBuffer<fp32::Ray> queries;
@@ -219,6 +220,7 @@ CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene, const std::vector<Material>
                       std::clamp(0.0,b.lo.z,b.hi.z)};
     }
     std::vector<fp32::Node> nodes(bvh.nodes.size());
+    std::vector<int> shape_index(scene.objects.size());
     std::vector<fp32::Triangle> triangles;
     std::vector<fp32::Sphere> spheres;
     std::vector<fp32::ShadowSurface> surfaces(materials.empty() ? 0 : scene.objects.size());
@@ -286,6 +288,7 @@ CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene, const std::vector<Material>
             n.shape = ~int(spheres.size());
             spheres.push_back({pack_geometry(position),pack_geometry(velocity),static_cast<float>(radius)});
         }
+        shape_index[src.object] = n.shape;
         if (!materials.empty()) {
             const int material = std::visit([](const auto& s){ return s.material_id; },shape);
             const auto& m = materials.at(material);
@@ -319,6 +322,7 @@ CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene, const std::vector<Material>
     }
     gpu.node_count = int(nodes.size());
     gpu.nodes.upload(nodes);
+    gpu.shape_index.upload(shape_index);
     gpu.triangles.upload(triangles);
     gpu.spheres.upload(spheres);
     gpu.surfaces.upload(surfaces);
@@ -334,6 +338,25 @@ CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene, const std::vector<Material>
     gpu.host_hits.resize(capacity);
 }
 CudaBVH::~CudaBVH() = default;
+Vec3 CudaBVH::coordinate_origin() const { return storage_->origin; }
+fp32::GeometryView CudaBVH::device_geometry() const {
+    const auto& g = *storage_;
+    return {g.triangles.ptr,g.spheres.ptr,
+            {g.surfaces.ptr,g.uvs.ptr,g.nearest_uvs.ptr,g.materials.ptr,g.textures.ptr,g.texels.ptr},
+            g.shape_index.ptr};
+}
+void CudaBVH::intersect_device(const fp32::Ray* rays, fp32::Hit* hits, int count) const {
+    const auto& g = *storage_;
+    const DeviceBVH tree{g.nodes.ptr,g.node_count,g.triangles.ptr,g.spheres.ptr};
+    intersect_rays<<<(count+255)/256,256>>>(tree,rays,hits,count);
+    check(cudaGetLastError(),"launch closest hit");
+}
+void CudaBVH::shadow_device(const fp32::Ray* rays, float* result, int count) const {
+    const auto& g = *storage_;
+    const DeviceBVH tree{g.nodes.ptr,g.node_count,g.triangles.ptr,g.spheres.ptr};
+    shadow_segments<<<(count+255)/256,256>>>(tree,device_geometry().shadow,rays,result,count);
+    check(cudaGetLastError(),"launch shadow visibility");
+}
 CudaBVH::Statistics CudaBVH::stats() const { return storage_->timing; }
 void CudaBVH::intersect(const RayQuery* queries, GeometryHit* hits, int count) {
     intersect_batch(queries,hits,count,nullptr,0);

@@ -2,7 +2,18 @@
 #include <cuda_runtime.h>
 
 namespace fp32 {
-struct V { float x, y, z; };
+struct V {
+    float x, y, z;
+    __host__ __device__ V operator+(V b) const { return {x+b.x,y+b.y,z+b.z}; }
+    __host__ __device__ V operator-(V b) const { return {x-b.x,y-b.y,z-b.z}; }
+    __host__ __device__ V operator*(float s) const { return {x*s,y*s,z*s}; }
+    __device__ float dot(V b) const { return x*b.x+y*b.y+z*b.z; }
+    __device__ V cross(V b) const { return {y*b.z-z*b.y,z*b.x-x*b.z,x*b.y-y*b.x}; }
+    __device__ V normalized() const {
+        const float length = sqrtf(dot(*this));
+        return length > 0 ? *this*(1.f/length) : V{};
+    }
+};
 struct Ray { V origin, direction; float time, minimum, maximum; };
 struct Hit { float t = 0, u = 0, v = 0; int object = -1; };
 struct Triangle { V a, b, c, velocity; };

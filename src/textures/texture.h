@@ -14,6 +14,9 @@ struct Texture {
     Vec3 value(UV uv, double lod=0) const;
     int last_level() const { return static_cast<int>(lower_levels_.size()); }
     Filter filter() const { return filter_; }
+    const std::vector<Vec3>& level_pixels(int level) const {
+        return level ? lower_levels_.at(level-1).pixels : pixels;
+    }
 
 private:
     struct Level { int width, height; std::vector<Vec3> pixels; };

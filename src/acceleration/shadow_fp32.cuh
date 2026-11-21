@@ -24,6 +24,12 @@ struct ShadowData {
     const AlphaTexture* textures;
     const float* texels;
 };
+struct GeometryView {
+    const Triangle* triangles;
+    const Sphere* spheres;
+    ShadowData shadow;
+    const int* shape_index; // Original object ID to the packed BVH primitive.
+};
 
 __device__ inline int nearest_texel(const TexelAxis& a, float u, float v, int period) {
     const float p = u*a.du, q = v*a.dv;
