@@ -134,8 +134,8 @@ void BVH::build(const Scene& scene,double time_open,double time_close,BVHSplit s
     }
     std::vector<std::size_t> ids(boxes.size());
     std::iota(ids.begin(), ids.end(), std::size_t{0});
-    auto build_range = [&](auto&& self, std::size_t begin, std::size_t end) -> int {
-        const int index = static_cast<int>(built.size());
+    auto build_range = [&](auto&& self, std::size_t begin, std::size_t end) -> void {
+        const std::size_t index = built.size();
         AABB box = boxes[ids[begin]];
         for (auto i = begin + 1; i < end; ++i) box = merge(box, boxes[ids[i]]);
         built.push_back({box});
@@ -145,32 +145,39 @@ void BVH::build(const Scene& scene,double time_open,double time_close,BVHSplit s
             const auto mid = split == BVHSplit::sah
                 ? split_sah(ids, begin, end, boxes, centers, box)
                 : split_median(ids, begin, end, boxes, box);
-            const int left = self(self, begin, mid);
-            const int right = self(self, mid, end);
-            built[index].left = left;
-            built[index].right = right;
+            self(self, begin, mid);
+            self(self, mid, end);
         }
-        return index;
+        built[index].subtree_end = built.size();
     };
     if (!ids.empty()) build_range(build_range, 0, ids.size());
     nodes.swap(built);
 }
 bool BVH::intersect(const Scene& scene,const Ray& ray,double lo,double hi,HitRecord& hit,BVHTraversalStats* stats) const {
-    bool found=false;
-    auto visit=[&](auto&& self,int index)->void { const auto& n=nodes[index];
+    bool found = false;
+    std::size_t index = 0;
+    while (index < nodes.size()) {
+        const Node& node = nodes[index];
         if (stats) ++stats->box_tests;
-        if(!n.box.intersect(ray,lo,hi))return;
-        if(n.left<0) { HitRecord h;
-            if (stats) ++stats->primitive_tests;
-            if(std::visit([&](const auto& s){return s.intersect(ray,lo,hi,h);},scene.objects[n.object])&&(!found||h.t<hi||(h.t==hi&&n.object<hit.object_index))) {found=true;
-                hi=h.t;
-                hit=h;
-                hit.object_index=n.object;
-            } }
-        else {self(self,n.left);
-            self(self,n.right);
+        if (!node.box.intersect(ray, lo, hi)) {
+            index = node.subtree_end;
+            continue;
         }
-    };
-    if(!nodes.empty())visit(visit,0);
+        if (node.is_leaf()) {
+            if (stats) ++stats->primitive_tests;
+            HitRecord candidate;
+            const bool intersects = std::visit([&](const auto& shape) {
+                return shape.intersect(ray, lo, hi, candidate);
+            }, scene.objects[node.object]);
+            if (intersects && (!found || candidate.t < hi ||
+                               (candidate.t == hi && node.object < hit.object_index))) {
+                found = true;
+                hi = candidate.t;
+                hit = candidate;
+                hit.object_index = node.object;
+            }
+        }
+        ++index;
+    }
     return found;
 }

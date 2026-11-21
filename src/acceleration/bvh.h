@@ -14,9 +14,12 @@ struct AABB { Vec3 lo,hi;
     bool clip_interval(const Ray&, double& enter, double& exit) const;
 };
 struct BVH {
-    struct Node { AABB box;
-        int left=-1,right=-1;
-        std::size_t object=0;
+    struct Node {
+        AABB box;
+        // Nodes are in preorder. This is the first index after this subtree.
+        std::size_t subtree_end = 0;
+        std::size_t object = HitRecord::no_object;
+        bool is_leaf() const { return object != HitRecord::no_object; }
     };
     std::vector<Node> nodes;
     void build(const Scene&, double time_open=0, double time_close=0, BVHSplit split=BVHSplit::median);

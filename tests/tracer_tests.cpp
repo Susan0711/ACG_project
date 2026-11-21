@@ -11,8 +11,14 @@ void check_sah_splits() {
     cluster.objects.push_back(Sphere{{30,0,0}, 0.1});
     BVH tree;
     tree.build(cluster, 0, 0, BVHSplit::sah);
-    const auto& isolated = tree.nodes[tree.nodes.front().right];
-    check(isolated.left == -1 && isolated.object == 7, "SAH should isolate the distant sphere");
+    check(tree.nodes.front().subtree_end == tree.nodes.size(), "Root ends after the last node");
+    const auto& isolated = tree.nodes.at(tree.nodes.at(1).subtree_end);
+    check(isolated.is_leaf() && isolated.object == 7, "SAH should isolate the distant sphere");
+    BVHTraversalStats skip_stats;
+    HitRecord isolated_hit;
+    check(tree.intersect(cluster, {{30,0,3},{0,0,-1}}, 0, 5, isolated_hit, &skip_stats) &&
+          isolated_hit.object_index == 7, "Continue at the right child after missing the left subtree");
+    check(skip_stats.box_tests == 3 && skip_stats.primitive_tests == 1, "Skip descendants of a missed box");
 
     Scene tied{{Sphere{{0,0,0},1,3}, Sphere{{0,0,0},1,4}, Sphere{{0,0,0},1,5}}};
     tree.build(tied, 0, 0, BVHSplit::sah);
