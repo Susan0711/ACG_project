@@ -1,8 +1,12 @@
 #include "render/path_integrator.h"
+#include "render/direct_lighting.h"
 #include "io/assets.h"
 #include "scene_init.h"
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 void require(bool condition,const char* message) {
     if(!condition) throw std::runtime_error(message);
@@ -132,6 +136,38 @@ void check_json_lens_and_alpha() {
     require(lowest < 0.1 && highest > 0.9, "Mask has both leaf and uncovered parts");
 }
 
+Vec3 ground_center_direct_light(const World& world) {
+    const RenderScene scene(world);
+    const Ray ray = scene.camera().generate(0.5, 0.5, double(world.film_size.width) / world.film_size.height);
+    HitRecord ground;
+    require(scene.intersect(ray, 0, std::numeric_limits<double>::infinity(), ground),
+            "Camera center ray hits the ground");
+    require(ground.position.dot(ground.position) < 1e-20, "Measure direct light at the ground origin");
+    Sampler rng{1};
+    return direct_lighting(scene, ray, ground, scene.material(ground), rng, SamplingMode::nee);
+}
+
+void check_volume_alpha_shadow() {
+    World world = load_scene_file("scene/volume_alpha_shadow.json");
+    World clear = world;
+    clear.medium.density = 0;
+    const Vec3 baseline = ground_center_direct_light(clear);
+    require(std::min({baseline.x, baseline.y, baseline.z}) > 0, "Unobstructed ground receives direct light");
+    std::cout << std::setprecision(12) << "fog thickness=0 direct_r=" << baseline.x << " ratio=1\n";
+
+    const auto check_thickness = [&](double thickness) {
+        const Vec3 light = ground_center_direct_light(world);
+        const Vec3 ratio{light.x / baseline.x, light.y / baseline.y, light.z / baseline.z};
+        const double expected = std::exp(-0.2 * thickness);
+        const Vec3 error = ratio - Vec3{expected, expected, expected};
+        require(error.dot(error) < 1e-24, "Ground direct light follows Beer-Lambert attenuation");
+        std::cout << "fog thickness=" << thickness << " direct_r=" << light.x << " ratio=" << ratio.x << '\n';
+    };
+    check_thickness(2);
+    world.medium.bounds.hi.y += 2;
+    check_thickness(4);
+}
+
 int main() {
     try {
         check_obj_corner_normals();
@@ -139,6 +175,7 @@ int main() {
         check_motion_scene();
         check_json_environment();
         check_json_lens_and_alpha();
+        check_volume_alpha_shadow();
         HitRecord hit;
         Triangle triangle{{0,0,0},{1,0,0},{0,1,0},0};
         require(triangle.intersect({{0.25,0.5,1},{0,0,-1}},0,2,hit),"UV triangle hit");
