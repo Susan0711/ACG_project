@@ -141,7 +141,7 @@ main(argc, argv)
 
 ### 1. 命令行参数与场景路径解析
 
-`parse_arguments()` 逐对读取命令行选项。`main()` 将指定的 `spp` 和线程数应用到 `RenderSettings`，给单独的场景文件名补上 `scene/` 前缀。加载 JSON 后再逐轴确定画布尺寸，优先级为命令行、场景 `film`、默认尺寸。最大反弹深度 16、随机种子 1 和默认的直接光采样模式 NEE 均来自 `RenderSettings`。[参数解析](src/main.cpp) · [默认设置](src/render/render.h)
+`parse_arguments()` 逐对读取命令行选项。`main()` 将指定的 `spp` 和线程数应用到 `RenderSettings`，给单独的场景文件名补上 `scene/` 前缀。加载 JSON 后再逐轴确定画布尺寸，优先级为命令行、场景 `film`、默认尺寸。最大反弹深度 16、随机种子 1 和默认的直接光采样模式 NEE 均来自 `RenderSettings`。[参数解析](src/main.cpp) · [渲染设置](src/render_scene.h)
 
 ### 2. `World` 对象的构建
 
@@ -161,11 +161,13 @@ load_scene_file(path)
 
 ### 3. BVH 构建与 `Film` 初始化
 
-`RenderScene` 的构造函数接管 `World`，按相机快门区间调用一次 `BVH::build()`。`bounds()` 先计算每个三角形在该区间内的包围盒，局部函数 `build_range` 合并当前组的包围盒，再由 `split_median()` 沿最长轴按盒中心排序、从中间分组，递归到每个叶节点只存一个图元索引。稍后每条射线查询的都是这棵树。[场景构造](src/render_scene.cpp) · [BVH 建树与遍历](src/acceleration/bvh.cpp)
+`RenderScene` 的构造函数接管 `World`，按相机快门区间调用一次 `BVH::build()`。`bounds()` 先计算每个三角形在该区间内的包围盒，局部函数 `build_range` 合并当前组的包围盒，再由 `split_median()` 沿最长轴按盒中心排序、从中间分组，递归到每个叶节点只存一个图元索引。稍后每条射线查询的都是这棵树。[RenderScene 构造](src/render/render.cpp) · [BVH 建树与遍历](src/acceleration/bvh.cpp)
 
-接下来 `main()` 按已解析的宽高创建 `Film`。例如 `forest.json` 省略了 `film`，按默认参数运行时画布为 256 × 256，共 65,536 个像素。场景和画布通过引用传入 `render()`，后者负责计算并填写像素。[Film 定义](src/render/film.h)
+接下来 `main()` 按已解析的宽高创建 `Film`。例如 `forest.json` 省略了 `film`，按默认参数运行时画布为 256 × 256，共 65,536 个像素。工作线程共享只读的 `RenderScene`，将各自负责的像素写入同一个 `Film`。[场景查询接口](src/render/render.h) · [Film 定义](src/render/film.h)
 
 ### 4. 工作线程的图块分配与像素采样
+
+顶层的 `render_scene.cpp` 实现整帧入口 `render()`。它分配图块、发起相机采样，并对每条射线调用 `integrate()`。积分器通过 `RenderScene::intersect()` 查找最近命中，直接光计算通过 `RenderScene::visibility()` 查询到光源的透过率。这两个查询都实现在 `render/render.cpp`。[整帧调度](src/render_scene.cpp) · [路径积分](src/render/path_integrator.cpp) · [场景查询](src/render/render.cpp)
 
 ```text
 render(scene, film, settings)
@@ -180,7 +182,7 @@ render(scene, film, settings)
 └── join() 等待所有工作线程结束，返回 main()
 ```
 
-`Camera::generate()` 用相机朝向、垂直视场角和画幅宽高比，把画面坐标 `(u, v)` 换成世界空间中的射线方向。`forest.json` 使用针孔和固定快门，每条相机射线从 `[0, 1, 4]` 出发，时刻为 0。其他场景如果设置了光圈或快门区间，`Camera::sample()` 还会采样镜头位置或射线时刻。每份样本的随机序列由种子、像素编号和样本编号决定，因此改变线程数只会改变由哪个线程领取图块。[线程与像素循环](src/render/render.cpp) · [相机射线](src/render/camera.cpp)
+`Camera::generate()` 用相机朝向、垂直视场角和画幅宽高比，把画面坐标 `(u, v)` 换成世界空间中的射线方向。`forest.json` 使用针孔和固定快门，每条相机射线从 `[0, 1, 4]` 出发，时刻为 0。其他场景如果设置了光圈或快门区间，`Camera::sample()` 还会采样镜头位置或射线时刻。每份样本的随机序列由种子、像素编号和样本编号决定，因此改变线程数只会改变由哪个线程领取图块。[线程与像素循环](src/render_scene.cpp) · [相机射线](src/render/camera.cpp)
 
 ### 5. 单条光路的积分
 
@@ -211,7 +213,7 @@ integrate(scene, ray, ...)
 
 #### 直接光照与可见性查询
 
-相机射线确定石头表面的可见点。计算该点接收的直接光时，还需检查它与光源之间的遮挡。`evaluate_bsdf()` 用命中点的贴图反照率求出漫反射系数，`visibility()` 则向点光源发出阴影射线，只检查命中点到灯之间的线段，遇到遮挡层就将透过率乘以 `1 − α`。`direct_lighting()` 根据材质、入射光、入射角和可见性返回直接光贡献，积分器以 `result += throughput × direct` 逐通道累加。[直接光计算](src/render/direct_lighting.cpp) · [逐灯采样](src/lighting/lights.h) · [阴影查询](src/render_scene.cpp)
+相机射线确定石头表面的可见点。计算该点接收的直接光时，还需检查它与光源之间的遮挡。`evaluate_bsdf()` 用命中点的贴图反照率求出漫反射系数，`visibility()` 则向点光源发出阴影射线，只检查命中点到灯之间的线段，遇到遮挡层就将透过率乘以 `1 − α`。`direct_lighting()` 根据材质、入射光、入射角和可见性返回直接光贡献，积分器以 `result += throughput × direct` 逐通道累加。[直接光计算](src/render/direct_lighting.cpp) · [逐灯采样](src/lighting/lights.h) · [阴影查询](src/render/render.cpp)
 
 #### 散射采样与路径终止
 
@@ -243,14 +245,19 @@ src/
 ├── main.cpp             path_tracer 命令入口
 ├── scene_init.cpp       从 JSON 装配 World
 ├── world.*              相机、几何、材质、光源，以及面光源登记
-├── render_scene.*       管理 World 和 BVH，提供最近命中与阴影可见性查询
+├── render_scene.*       整帧入口 render() 和 RenderSettings，调度工作线程并写入 Film 像素
 ├── core/                向量、随机采样、射线、命中记录与图元求交
 ├── acceleration/        BVH 构建和遍历
 ├── io/                  OBJ 导入与 JSON 字段校验
 ├── materials/           材质参数解析、散射求值与方向采样
 ├── textures/            P3 贴图读取与 UV 查询
 ├── lighting/            点光源、面光源与环境光采样
-├── render/              相机、路径积分、图块调度与 Film
+├── render/
+│   ├── render.*         RenderScene 持有 World 和 BVH，提供求交与阴影透过率查询
+│   ├── camera.*         相机射线、镜头与快门采样
+│   ├── path_integrator.* 逐次追踪路径并累加辐射亮度
+│   ├── direct_lighting.* 光源采样与直接光估计
+│   └── film.*           保存线性 RGB 像素并输出图像
 └── test/                独立的 normal_preview 法线检查程序
 tests/                   单元测试、命令行测试及 C++ 内置回归场景
 tools/                   资产生成、对照与历史验证脚本

@@ -1,5 +1,5 @@
 #include "render/direct_lighting.h"
-#include "render/render.h"
+#include "render_scene.h"
 #include "scenes/factories.h"
 #include <algorithm>
 #include <iostream>

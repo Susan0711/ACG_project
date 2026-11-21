@@ -1,22 +1,14 @@
 #pragma once
-#include "acceleration/bvh.h"
-#include "world.h"
-#include <optional>
+#include "render/film.h"
+#include "render/path_integrator.h"
+#include <cstdint>
 
-enum class Acceleration { linear, bvh };
-
-// Own the geometry and its index together for the lifetime of a render.
-class RenderScene {
-public:
-    explicit RenderScene(World world, Acceleration backend = Acceleration::bvh);
-    const Camera& camera() const { return world_.camera; }
-    const Lighting& lights() const { return world_.lights; }
-    const Material& material(const HitRecord& hit) const { return world_.materials.at(hit.material_id); }
-    bool intersect(const Ray&, double minimum, double maximum, HitRecord&) const;
-    double visibility(const HitRecord&, const LightSample&) const;
-    double shadow_transmittance(Ray, double distance) const;
-
-private:
-    World world_;
-    std::optional<BVH> bvh_;
+struct RenderSettings {
+    static constexpr int max_threads = 256;
+    int spp=64, depth=16, threads=1;
+    std::uint64_t seed=1;
+    SamplingMode mode=SamplingMode::nee;
 };
+
+// Render one frame into the supplied film using a shared, prepared scene.
+void render(const RenderScene& scene, Film& film, const RenderSettings& settings);
