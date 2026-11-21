@@ -15,10 +15,11 @@ double unit_parameter(const nlohmann::json& entry, const char* field, double fal
 }
 
 std::shared_ptr<const Texture> read_texture(const nlohmann::json& entry, const char* field,
-                                           const std::filesystem::path& directory, bool decode_srgb) {
+                                           const std::filesystem::path& directory, bool decode_srgb,
+                                           Texture::Filter filter=Texture::Filter::nearest) {
     const auto file = std::filesystem::u8path(entry.at(field).get<std::string>());
     auto texture = std::make_shared<Texture>();
-    texture->load(directory / file, decode_srgb);
+    texture->load(directory / file, decode_srgb, filter);
     return texture;
 }
 
@@ -50,18 +51,26 @@ Material read_material(const nlohmann::json& entry, const std::filesystem::path&
         const char* base_field = textured ? "texture" : "color";
         if (type == "principled") {
             json_fields::expect_fields(entry, {"type", base_field, "metallic", "roughness", "opacity", "opacity_map",
-                                              "normal_map", "normal_map_enabled", "roughness_map", "roughness_map_enabled"});
+                                              "normal_map", "normal_map_enabled", "roughness_map", "roughness_map_enabled",
+                                              "texture_filter"});
             material.kind = Kind::principled;
             material.metallic = unit_parameter(entry, "metallic", material.metallic);
             material.roughness = unit_parameter(entry, "roughness", material.roughness);
             material.normal_map = read_data_map(entry, "normal_map", scene_directory);
             material.roughness_map = read_data_map(entry, "roughness_map", scene_directory);
         } else {
-            json_fields::expect_fields(entry, {"type", base_field, "opacity", "opacity_map"});
+            json_fields::expect_fields(entry, {"type", base_field, "opacity", "opacity_map", "texture_filter"});
             material.kind = type == "diffuse" ? Kind::diffuse : Kind::mirror;
         }
+        if (entry.contains("texture_filter") && !textured)
+            throw std::runtime_error("texture_filter requires a base color texture");
         if (textured) {
-            material.texture = read_texture(entry, "texture", scene_directory, true);
+            const auto name = entry.value("texture_filter", std::string{"nearest"});
+            auto filter = Texture::Filter::nearest;
+            if (name == "bilinear") filter = Texture::Filter::bilinear;
+            else if (name == "mipmap") filter = Texture::Filter::mipmap;
+            else if (name != "nearest") throw std::runtime_error("Unknown texture_filter: " + name);
+            material.texture = read_texture(entry, "texture", scene_directory, true, filter);
         } else {
             material.color = json_fields::rgb(entry, "color");
             const Vec3 c = material.color;

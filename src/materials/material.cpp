@@ -46,7 +46,7 @@ BSDFEvaluation evaluate_principled(const Material& material, Vec3 view, const Hi
     const double visibility = 0.5 / (nl * std::sqrt(a2 + (1 - a2) * nv * nv)
                                     + nv * std::sqrt(a2 + (1 - a2) * nl * nl));
 
-    const Vec3 base = material.albedo(hit.uv);
+    const Vec3 base = material.albedo(hit.uv, hit.albedo_lod);
     const double dielectric = 1 - material.metallic;
     const Vec3 f0 = Vec3{0.04, 0.04, 0.04} * dielectric + base * material.metallic;
     const double grazing = std::pow(1 - vh, 5);
@@ -66,7 +66,7 @@ BSDFEvaluation evaluate_bsdf(const Material& material, const Ray& incident, cons
     if (!material.has_continuous_bsdf()) return {};
     double density = cosine_pdf(hit.normal, direction);
     if (density == 0) return {};
-    return {material.albedo(hit.uv) * (1.0 / pi), density};
+    return {material.albedo(hit.uv, hit.albedo_lod) * (1.0 / pi), density};
 }
 double fresnel(double c,double ei,double et) {
     c=std::clamp(c,0.0,1.0);
@@ -79,7 +79,7 @@ BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampl
     Vec3 d=ray.direction.normalized(),n=h.normal;
     if(m.kind==Kind::diffuse) {
         Vec3 wi = sample_cosine(n, rng);
-        return {wi,m.albedo(h.uv),cosine_pdf(n,wi),false};
+        return {wi,m.albedo(h.uv, h.albedo_lod),cosine_pdf(n,wi),false};
     }
     if (m.kind == Kind::principled) {
         Vec3 wi;

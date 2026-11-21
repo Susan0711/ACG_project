@@ -107,6 +107,7 @@ cmake --build build-local --target path_tracer --parallel
 │       │   │   ├── roughness_map   可选，线性 P3 PPM，以红通道覆盖该点的 roughness
 │       │   │   └── roughness_map_enabled  布尔值，提供路径时默认 true，false 使用常量 roughness
 │       │   └── "emissive"          color 为发射辐亮度 [r, g, b]，各通道 ≥ 0，可大于 1
+│       ├── texture_filter          diffuse、principled 的底色贴图可选。nearest（默认）取最近纹素，bilinear 固定原图做双线性过滤，mipmap 按像素覆盖范围选层并做三线性过滤
 │       ├── opacity                 前四类可选，表面覆盖率在 [0, 1] 内，默认 1
 │       └── opacity_map             前四类可选，覆盖率贴图路径（P3 PPM）
 ├── objects[]                       每项放置一份 OBJ，同一网格可多次摆放
@@ -257,6 +258,7 @@ integrate(scene, ray, ...)
 | [hdr_environment.json](scene/hdr_environment.json) | 左侧灰色漫反射球和右侧镜面球共用一个球体网格。将 `rotation_degrees` 从 0 改为 90，可观察受光方向和镜面倒影的移动。 |
 | [mis_sampling.json](scene/mis_sampling.json) | 小面光源与 HDR 天空共同照亮两颗球。固定 `--spp` 并切换 `--mode`，可观察三种策略的噪声差异。 |
 | [principled_maps.json](scene/principled_maps.json) | 面光源斜照一块平板。分别切换 `normal_map_enabled` 和 `roughness_map_enabled`，观察细条纹引起的高光偏转和两个宽分区的高光宽度。 |
+| [mipmap_pier.json](scene/mipmap_pier.json) | 沿斜向延伸的栈桥看近、远两端的木纹。将 `boards.texture_filter` 在 `bilinear` 和 `mipmap` 间切换，可在同一机位比较固定原图与自适应选层。 |
 | [tidewatch.json](scene/tidewatch.json) | 潮汐观测站将塔楼、码头、海面和帆船组合在一份 JSON 中。海面用带法线的波浪网格配合镜面材质，船的多个部件共用平移速度。 |
 
 ## 项目结构
@@ -318,3 +320,7 @@ docs/                    设计、素材来源与阶段记录
 ### B2：法线贴图、粗糙度属性贴图
 
 两张贴图都按命中点的 UV 读取线性数据。法线贴图的 RGB 解码为切线空间方向，再按 UV 的朝向转换为着色法线，供直接光和反射采样共用。粗糙度贴图的红通道给出局部粗糙度，参与 GGX 求值与采样。两张图分别通过各自的 `_enabled` 字段开关。
+
+### B3：自适应 mipmap
+
+加载底色贴图时，`mipmap` 在线性 RGB 中按面积平均，依次生成并保存缩小的纹理，直到 1×1。渲染时根据视场角、输出高度和传播距离估计像素的射线锥宽度，再通过表面几何和 UV 梯度求得覆盖范围的长轴。若长轴覆盖 `ρ` 个纹素，取 `log₂(max(1, ρ))` 选择层级，在相邻两层分别做双线性采样后插值。

@@ -31,6 +31,23 @@ Vec3 Sphere::mapped_normal(const HitRecord& hit, Vec3 local) const {
     return from_tangent_space(hit, tangent, -1, local);
 }
 
+std::optional<UVGradients> Triangle::uv_gradients(const HitRecord& hit) const {
+    if (!has_complete_uvs) return UVGradients{};
+    const Vec3 e1 = b - a, e2 = c - a, n = hit.outward_normal;
+    const double area = e1.dot(e2.cross(n));
+    const Vec3 grad_b = e2.cross(n) * (1 / area), grad_c = n.cross(e1) * (1 / area);
+    return UVGradients{grad_b * (tb.u - ta.u) + grad_c * (tc.u - ta.u),
+                       grad_b * (tb.v - ta.v) + grad_c * (tc.v - ta.v)};
+}
+
+std::optional<UVGradients> Sphere::uv_gradients(const HitRecord& hit) const {
+    const Vec3 n = hit.outward_normal;
+    const double horizontal2 = n.x * n.x + n.z * n.z;
+    if (horizontal2 < 1e-20) return std::nullopt;  // Longitude is undefined at the poles.
+    return UVGradients{Vec3{-n.z, 0, n.x} * (1 / (2 * pi * radius * horizontal2)),
+                       (Vec3{0, 1, 0} - n * n.y) * (1 / (pi * radius * std::sqrt(horizontal2)))};
+}
+
 bool Sphere::intersect(const Ray& ray, double lo, double hi, HitRecord& hit) const {
     if (!valid(ray,lo,hi)) return false;
     const Vec3 oc = ray.origin-center_at(ray.time);

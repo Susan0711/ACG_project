@@ -16,6 +16,7 @@ void render(const RenderScene& scene, Film& film, const RenderSettings& settings
     if(settings.threads<1 || settings.threads>RenderSettings::max_threads || settings.spp<1 || settings.depth<1)
         throw std::runtime_error("Invalid render settings");
     const int tiles_x=(film.width+15)/16, tiles_y=(film.height+15)/16;
+    const double pixel_spread = scene.uses_mipmaps() ? 2 * std::tan(scene.camera().fov * pi / 360) / film.height : 0;
     std::atomic<int> next{0};
     std::atomic<bool> stop{false};
     std::mutex error_mutex;
@@ -35,6 +36,7 @@ void render(const RenderScene& scene, Film& film, const RenderSettings& settings
                             double u=(x+rng.next())/film.width;
                             double v=(y+rng.next())/film.height;
                             Ray ray=scene.camera().sample(u,v,double(film.width)/film.height,rng);
+                            ray.cone.spread = pixel_spread;
                             sum=sum+integrate(scene,ray,rng,settings.depth,settings.mode);
                         }
                         film.pixels[pixel]=sum*(1.0/settings.spp);

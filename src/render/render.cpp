@@ -4,11 +4,30 @@
 #include <stdexcept>
 #include <utility>
 
+namespace {
+double footprint_lod(const Ray& ray, const HitRecord& hit, const std::optional<UVGradients>& uv,
+                     const Texture& texture) {
+    const Vec3 n = hit.outward_normal, d = ray.direction.normalized();
+    const double cosine = n.dot(d);
+    if (!uv || std::abs(cosine) < 1e-12) return texture.last_level();
+    // Project a circular ray cross-section onto the tangent plane and into texel coordinates.
+    const Vec3 u = (uv->du - n * (uv->du.dot(d) / cosine)) * texture.width;
+    const Vec3 v = (uv->dv - n * (uv->dv.dot(d) / cosine)) * texture.height;
+    const double uu = u.dot(u), vv = v.dot(v);
+    const double major2 = 0.5 * (uu + vv + std::hypot(uu - vv, 2 * u.dot(v)));
+    const double span = ray.cone.advanced(ray.direction * hit.t).width * std::sqrt(major2);
+    if (!std::isfinite(span)) return texture.last_level();
+    return std::min(std::log2(std::max(1.0, span)), static_cast<double>(texture.last_level()));
+}
+}
+
 RenderScene::RenderScene(World world, Acceleration backend, BVHSplit split) : world_(std::move(world)) {
     const Camera& camera = world_.camera;
     camera.validate();
     has_normal_maps_ = std::any_of(world_.materials.begin(), world_.materials.end(),
                                    [](const Material& m) { return bool(m.normal_map); });
+    has_mipmaps_ = std::any_of(world_.materials.begin(), world_.materials.end(),
+                               [](const Material& m) { return m.texture && m.texture->last_level() > 0; });
     if (backend == Acceleration::bvh) {
         bvh_.emplace().build(world_.scene, camera.shutter_open, camera.shutter_close, split);
     }
@@ -16,6 +35,14 @@ RenderScene::RenderScene(World world, Acceleration backend, BVHSplit split) : wo
 
 bool RenderScene::intersect(const Ray& ray, double minimum, double maximum, HitRecord& hit) const {
     if (!intersect_geometry(ray, minimum, maximum, hit)) return false;
+    if (has_mipmaps_ && (ray.cone.spread > 0 || ray.cone.width > 0)) {
+        const auto& texture = material(hit).texture;
+        if (texture && texture->last_level() > 0) {
+            const auto gradients = std::visit([&](const auto& shape) { return shape.uv_gradients(hit); },
+                                              world_.scene.objects.at(hit.object_index));
+            hit.albedo_lod = footprint_lod(ray, hit, gradients, *texture);
+        }
+    }
     if (has_normal_maps_) {
         const auto& map = material(hit).normal_map;
         if (map) {

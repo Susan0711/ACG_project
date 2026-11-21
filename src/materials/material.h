@@ -20,7 +20,7 @@ struct Material {
     bool has_continuous_bsdf() const { return kind == Kind::diffuse || kind == Kind::principled; }
     bool is_emitter() const { return kind == Kind::emissive; }
     double alpha(UV uv) const;
-    Vec3 albedo(UV uv) const { return texture ? texture->value(uv) : color; }
+    Vec3 albedo(UV uv, double lod=0) const { return texture ? texture->value(uv, lod) : color; }
 };
 struct BSDFSample {
     Vec3 direction, weight;

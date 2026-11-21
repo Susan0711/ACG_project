@@ -25,7 +25,7 @@ Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, Sampl
             const Vec3 position = *segment.collision;
             const Vec3 direct = medium_direct_lighting(scene, position, ray.time, rng, mode);
             result = result + multiply(throughput, direct);
-            ray = {position, sample_isotropic_direction(rng), ray.time};
+            ray = {position, sample_isotropic_direction(rng), ray.time, ray.cone.advanced(position - ray.origin)};
             previous_delta = false;
             previous_pdf = isotropic_phase_pdf;
             previous_position = position;
@@ -40,7 +40,9 @@ Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, Sampl
             const double alpha = material.alpha(hit.uv);
             if (alpha < 1 && (alpha == 0 || rng.next() >= alpha)) {
                 if (++alpha_crossings > 4096) throw std::runtime_error("Alpha crossing limit exceeded");
-                ray.origin = ray.at(std::nextafter(hit.t, infinity)) + ray.direction * 1e-7;
+                const Vec3 next_origin = ray.at(std::nextafter(hit.t, infinity)) + ray.direction * 1e-7;
+                ray.cone = ray.cone.advanced(next_origin - ray.origin);
+                ray.origin = next_origin;
                 continue;
             }
 
@@ -63,7 +65,9 @@ Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, Sampl
             previous_delta = sampled.delta;
             previous_pdf = sampled.pdf;
             previous_position = hit.position;
+            const RayCone cone = ray.cone.advanced(ray.direction * hit.t);
             ray = spawn(hit, sampled.direction);
+            ray.cone = cone;
         }
         if (!finite(throughput) || !finite(result) || !finite(ray.direction))
             throw std::runtime_error("Nonfinite path state");

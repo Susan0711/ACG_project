@@ -1,0 +1,48 @@
+{
+  "film": {"width": 480, "height": 320},
+  "camera": {"position": [0.58, 0.54, 1.72], "target": [0, 0.12, -0.9], "fov_degrees": 42},
+  "materials": {
+    "boards": {"type": "diffuse", "texture": "../assets/wood.ppm", "texture_filter": "mipmap"}
+  },
+  "objects": [
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, 1.2], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, 1.0], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, 0.8], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, 0.6], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, 0.4], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, 0.2], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -0.0], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -0.2], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -0.4], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -0.6], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -0.8], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -1.0], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -1.2], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -1.4], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -1.6], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -1.8], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -2.0], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -2.2], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -2.4], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -2.6], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -2.8], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -3.0], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -3.2], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -3.4], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -3.6], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -3.8], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -4.0], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -4.2], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -4.4], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -4.6], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -4.8], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -5.0], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -5.2], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -5.4], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -5.6], "material": "boards"},
+    {"mesh": "../assets/tidewatch/pier-board.obj", "position": [0, 0, -5.8], "material": "boards"}
+  ],
+  "lights": [
+    {"type": "point", "position": [-2, 6, 0], "intensity": [110, 110, 110]}
+  ]
+}
