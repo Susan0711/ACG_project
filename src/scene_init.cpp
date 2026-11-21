@@ -41,8 +41,8 @@ Camera read_camera(const Json& entry) {
     return camera;
 }
 
-HomogeneousMedium read_medium(const Json& entry) {
-    json_fields::expect_fields(entry, {"min", "max", "density", "albedo", "emission"});
+Medium read_medium(const Json& entry) {
+    json_fields::expect_fields(entry, {"type", "min", "max", "density", "density_top", "albedo", "emission"});
     const Vec3 lo = json_fields::vector3(entry, "min"), hi = json_fields::vector3(entry, "max");
     if (!finite(lo) || !finite(hi) || lo.x >= hi.x || lo.y >= hi.y || lo.z >= hi.z)
         throw std::runtime_error("medium.min must be below medium.max on each axis, with finite bounds");
@@ -54,7 +54,19 @@ HomogeneousMedium read_medium(const Json& entry) {
         throw std::runtime_error("medium.albedo must be in [0, 1]");
     const Vec3 emission = entry.contains("emission") ? json_fields::rgb(entry, "emission") : Vec3{};
     if (!finite(emission)) throw std::runtime_error("medium.emission must have finite RGB channels");
-    return {{lo, hi}, density, albedo, emission};
+    Medium medium{{lo, hi}, density, albedo, emission};
+    const auto type = entry.value("type", std::string{"homogeneous"});
+    if (type == "height_linear") {
+        medium.profile = DensityProfile::height_linear;
+        medium.density_top = json_fields::number(entry.at("density_top"), "medium.density_top");
+        if (!std::isfinite(medium.density_top) || medium.density_top < 0)
+            throw std::runtime_error("medium.density_top must be finite and nonnegative");
+    } else if (type != "homogeneous") {
+        throw std::runtime_error("Unknown medium type: " + type);
+    } else if (entry.contains("density_top")) {
+        throw std::runtime_error("medium.density_top requires type height_linear");
+    }
+    return medium;
 }
 
 void add_light(World& world, const Json& entry, const std::filesystem::path& directory) {

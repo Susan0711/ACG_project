@@ -13,7 +13,7 @@ public:
     bool uses_mipmaps() const { return has_mipmaps_; }
     bool uses_dispersion() const { return has_dispersion_; }
     const Lighting& lights() const { return world_.lights; }
-    const HomogeneousMedium& medium() const { return world_.medium; }
+    const Medium& medium() const { return world_.medium; }
     const Material& material(const HitRecord& hit) const { return world_.materials.at(hit.material_id); }
     bool intersect(const Ray&, double minimum, double maximum, HitRecord&) const;
     double visibility(const HitRecord&, const LightSample&) const;

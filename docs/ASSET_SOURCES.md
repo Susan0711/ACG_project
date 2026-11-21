@@ -86,3 +86,6 @@ The [HDR rotation scene](../scene/hdr_environment.json) uses an original unit sp
 
 `scene/coated_material.json`: comparison layout and material parameters authored by Codex at the user's request. Reuses the existing project-authored `studio-sphere.obj`, `studio-floor.obj` and `studio-hdr.pfm`; no new external mesh, texture or reference image. Left to right: bare Principled, clear coat, absorbing coat. Layered scattering background: https://pbr-book.org/4ed/Light_Transport_II_Volume_Rendering/Scattering_from_Layered_Materials ; the implemented model is an explicit single-scattering approximation, not copied PBRT source or its full layered solver.
 
+## A7 height-dependent fog comparison
+
+`scene/height_fog.json`: sphere layout and linear-height medium parameters authored by Codex at the user's request, using only the existing project-authored studio sphere, floor and floating-point environment. No new external assets or source images. The medium uses analytic optical-depth integration and inverse sampling of a linear vertical density profile.

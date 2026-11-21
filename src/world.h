@@ -17,6 +17,6 @@ struct World {
     Lighting lights;
     Camera camera;
     FilmSize film_size;
-    HomogeneousMedium medium;
+    Medium medium;
     void add_area(AreaLight light);
 };

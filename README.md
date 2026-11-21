@@ -257,6 +257,7 @@ integrate(scene, ray, ...)
 | [depth_of_field.json](scene/depth_of_field.json) | 同一个岩石网格分别摆在近处和远处。用 `focus_distance` 指定焦平面，用 `lens_radius` 调整光圈半径，设为 0 即恢复针孔相机。 |
 | [alpha_shadow.json](scene/alpha_shadow.json) | 一张薄片通过 `opacity_map` 定义叶片覆盖率。阴影射线每穿过一层，就将透过的直接光乘以该处的 `1 − α`。 |
 | [volume_alpha_shadow.json](scene/volume_alpha_shadow.json) | 点光源照向雾层下方的地面。默认雾层从 `y = 2` 到 `y = 4`，将 `medium.max` 的 Y 分量改为 `6` 即可加厚到 4 个单位。将 `density` 设为 `0` 可查看无雾基准。 |
+| [height_fog.json](scene/height_fog.json) | 不同高度的同色球体用于观察底浓顶淡的雾。调整 `density` 与 `density_top`，两者相等时退化为均匀雾。 |
 | [motion_blur.json](scene/motion_blur.json) | 相机固定，快门从 0 秒开到 1 秒。石头的 `velocity` 是 `[1.6, 0, 0]`，在射线时刻 `t` 按 `position + velocity × t` 定位。 |
 | [hdr_environment.json](scene/hdr_environment.json) | 左侧灰色漫反射球和右侧镜面球共用一个球体网格。将 `rotation_degrees` 从 0 改为 90，可观察受光方向和镜面倒影的移动。 |
 | [mis_sampling.json](scene/mis_sampling.json) | 小面光源与 HDR 天空共同照亮两颗球。固定 `--spp` 并切换 `--mode`，可观察三种策略的噪声差异。 |
@@ -318,6 +319,10 @@ docs/                    设计、素材来源与阶段记录
 ### A6：体积 Alpha 阴影
 
 从地面的受光点向点光源发出阴影射线，按射线在雾内的实际长度 `d` 计算透射率 `T = exp(−density × d)`。体积 Alpha 为 `1 − T`，地面接收的直接光乘以 `T`，因此同一位置的雾层越厚，阴影越深。
+
+### A7：非均匀介质
+
+`medium` 增加 `type: "height_linear"`，以原 `density` 为盒底消光系数、必填的 `density_top` 为盒顶消光系数，两者均非负，沿高度线性插值。沿射线解析积分光学厚度 `τ`，以 `exp(−τ)` 计算透过率，并反解光学厚度采样散射位置。相机、阴影和体积发光共用该模型。省略 `type` 时保持原均匀雾。
 
 ### B1：Principled BSDF
 
