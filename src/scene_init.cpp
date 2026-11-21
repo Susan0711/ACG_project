@@ -42,7 +42,7 @@ Camera read_camera(const Json& entry) {
 }
 
 HomogeneousMedium read_medium(const Json& entry) {
-    json_fields::expect_fields(entry, {"min", "max", "density", "albedo"});
+    json_fields::expect_fields(entry, {"min", "max", "density", "albedo", "emission"});
     const Vec3 lo = json_fields::vector3(entry, "min"), hi = json_fields::vector3(entry, "max");
     if (!finite(lo) || !finite(hi) || lo.x >= hi.x || lo.y >= hi.y || lo.z >= hi.z)
         throw std::runtime_error("medium.min must be below medium.max on each axis, with finite bounds");
@@ -52,7 +52,9 @@ HomogeneousMedium read_medium(const Json& entry) {
         throw std::runtime_error("medium.density must be finite and nonnegative");
     if (!std::isfinite(albedo) || albedo < 0 || albedo > 1)
         throw std::runtime_error("medium.albedo must be in [0, 1]");
-    return {{lo, hi}, density, albedo};
+    const Vec3 emission = entry.contains("emission") ? json_fields::rgb(entry, "emission") : Vec3{};
+    if (!finite(emission)) throw std::runtime_error("medium.emission must have finite RGB channels");
+    return {{lo, hi}, density, albedo, emission};
 }
 
 void add_light(World& world, const Json& entry, const std::filesystem::path& directory) {

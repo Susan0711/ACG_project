@@ -1,4 +1,5 @@
 #include "render/path_integrator.h"
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 void check(bool ok,const char* name) {
@@ -42,9 +43,31 @@ void check_medium() {
     }
 }
 
+void check_medium_emission() {
+    World world;  // Black background, no lights or scattering.
+    world.medium = {{{-1, -1, 0}, {1, 1, 2}}, 0.1, 0, {0.8, 0.25, 0.05}};
+    const Ray ray{{0, 0, -1}, {0, 0, 2}};
+    for (double length : {2.0, 4.0}) {
+        world.medium.bounds.hi.z = length;
+        const RenderScene scene(world);
+        const Vec3 expected = world.medium.emission * (1 - std::exp(-world.medium.density * length));
+        Vec3 measured{};
+        // These seeds exercise both a collision and an escape for each thickness.
+        for (unsigned seed : {3u, 0u}) {
+            Sampler rng{seed};
+            measured = integrate(scene, ray, rng, 1);
+            const Vec3 error = measured - expected;
+            check(error.dot(error) < 1e-24, "emitting fog integrates the full visible length");
+        }
+        std::cout << std::setprecision(12) << "fog length=" << length << " linear RGB=("
+                  << measured.x << ", " << measured.y << ", " << measured.z << ")\n";
+    }
+}
+
 int main() {
     try {
         check_medium();
+        check_medium_emission();
         Camera c;
         Sampler rng{12}; auto before=rng.state;
         Ray a=c.generate(.3,.6,1),b=c.sample(.3,.6,1,rng);

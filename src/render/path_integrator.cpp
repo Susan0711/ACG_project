@@ -16,17 +16,19 @@ Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, Sampl
     for (int bounce = 0; bounce <= depth;) {
         HitRecord hit;
         const bool hit_surface = scene.intersect(ray, 0, infinity, hit);
-        const auto collision = scene.medium().sample_collision(ray, hit_surface ? hit.t : infinity, rng);
-        if (collision) {
+        const auto segment = scene.medium().sample_segment(ray, hit_surface ? hit.t : infinity, rng);
+        result = result + multiply(throughput, segment.radiance);
+        if (segment.collision) {
             if (bounce == depth || scene.medium().albedo == 0) break;
             // Free-flight sampling already accounts for extinction on the incoming segment.
             throughput = throughput * scene.medium().albedo;
-            const Vec3 direct = medium_direct_lighting(scene, *collision, ray.time, rng, mode);
+            const Vec3 position = *segment.collision;
+            const Vec3 direct = medium_direct_lighting(scene, position, ray.time, rng, mode);
             result = result + multiply(throughput, direct);
-            ray = {*collision, sample_isotropic_direction(rng), ray.time};
+            ray = {position, sample_isotropic_direction(rng), ray.time};
             previous_delta = false;
             previous_pdf = isotropic_phase_pdf;
-            previous_position = *collision;
+            previous_position = position;
         } else if (!hit_surface) {
             const auto background = scene.lights().escape(ray.direction);
             const double weight = emission_weight(mode, previous_delta, previous_pdf,

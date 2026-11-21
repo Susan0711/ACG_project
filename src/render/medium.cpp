@@ -20,13 +20,18 @@ double HomogeneousMedium::transmittance(const Ray& ray, double t_max) const {
     return std::exp(-density * fog_segment(bounds, ray, t_max).length);
 }
 
-std::optional<Vec3> HomogeneousMedium::sample_collision(const Ray& ray, double t_max, Sampler& rng) const {
-    if (density == 0) return std::nullopt;
+MediumSegmentSample HomogeneousMedium::sample_segment(const Ray& ray, double t_max, Sampler& rng) const {
+    MediumSegmentSample sample;
+    if (density == 0) return sample;
     const Segment segment = fog_segment(bounds, ray, t_max);
-    if (segment.length == 0) return std::nullopt;
+    if (segment.length == 0) return sample;
+    // Integrate the full clipped segment; free flight below samples only the scattering term.
+    if (emission.x != 0 || emission.y != 0 || emission.z != 0)
+        sample.radiance = emission * (-std::expm1(-density * segment.length));
     const double free_path = -std::log1p(-rng.next()) / density;
-    if (free_path >= segment.length) return std::nullopt;
-    return ray.at(segment.enter + free_path / segment.speed);
+    if (free_path < segment.length)
+        sample.collision = ray.at(segment.enter + free_path / segment.speed);
+    return sample;
 }
 
 Vec3 sample_isotropic_direction(Sampler& rng) {
