@@ -4,12 +4,51 @@
 #include <stdexcept>
 #include <limits>
 void check(bool ok,const char* name){if(!ok)throw std::runtime_error(name);}
+
+void check_sah_splits() {
+    Scene cluster;
+    for (int i = 0; i < 7; ++i) cluster.objects.push_back(Sphere{{0.1*i,0,0}, 0.1});
+    cluster.objects.push_back(Sphere{{30,0,0}, 0.1});
+    BVH tree;
+    tree.build(cluster, 0, 0, BVHSplit::sah);
+    const auto& isolated = tree.nodes[tree.nodes.front().right];
+    check(isolated.left == -1 && isolated.object == 7, "SAH should isolate the distant sphere");
+
+    Scene tied{{Sphere{{0,0,0},1,3}, Sphere{{0,0,0},1,4}, Sphere{{0,0,0},1,5}}};
+    tree.build(tied, 0, 0, BVHSplit::sah);
+    HitRecord hit;
+    const Ray ray{{0,0,3},{0,0,-1}};
+    BVHTraversalStats stats;
+    check(tree.intersect(tied,ray,2,2,hit,&stats) && hit.object_index == 0 && hit.material_id == 3,
+          "Coincident centers and equal distances use original object order");
+    check(stats.box_tests == 5 && stats.primitive_tests == 3, "Count actual box and primitive tests");
+
+    // The smaller original index is in the child visited second.
+    Scene symmetric{{Sphere{{0.5,0,0},1,3}, Sphere{{-0.5,0,0},1,4}}};
+    tree.build(symmetric, 0, 0, BVHSplit::sah);
+    check(tree.intersect(symmetric,ray,0,5,hit) && hit.object_index == 0, "Tie across traversal order");
+    Scene empty;
+    tree.build(empty, 0, 0, BVHSplit::sah);
+    check(tree.nodes.empty() && !tree.intersect(empty,ray,0,5,hit), "Rebuild empty SAH tree");
+}
+
 int main(){try {
+    check_sah_splits();
     World w=make_world(false);
     BVH bvh; bvh.build(w.scene);
+    BVH sah; sah.build(w.scene, 0, 0, BVHSplit::sah);
     RenderScene prepared(w);
-    Sampler rng{42};HitRecord a,b;
-    for(int i=0;i<10000;++i){Ray r{{0,0,3.4},{rng.next()*2-1,rng.next()*2-1,-1}};bool x=w.scene.intersect(r,0,100,a),y=bvh.intersect(w.scene,r,0,100,b);check(x==y,"BVH hit mismatch");if(x)check(std::abs(a.t-b.t)<1e-12&&a.material_id==b.material_id,"BVH nearest mismatch");}
+    Sampler rng{42};HitRecord a;
+    for (int i = 0; i < 10000; ++i) {
+        Ray r{{0,0,3.4},{rng.next()*2-1,rng.next()*2-1,-1}};
+        const bool found = w.scene.intersect(r,0,100,a);
+        for (const BVH* tree : {&bvh, &sah}) {
+            HitRecord b;
+            check(found == tree->intersect(w.scene,r,0,100,b), "BVH hit mismatch");
+            if (found) check(a.t == b.t && a.object_index == b.object_index &&
+                             a.material_id == b.material_id && a.light_id == b.light_id, "BVH nearest mismatch");
+        }
+    }
     AABB box{{0,0,0},{1,1,0}};check(box.intersect({{0.5,0.5,1},{0,0,-1}},1,1),"zero thickness boundary");check(!box.intersect({{2,0.5,1},{0,0,-1}},0,2),"parallel outside slab");
     double nan=std::numeric_limits<double>::quiet_NaN();check(!w.scene.intersect({{nan,0,0},{0,0,-1}},0,10,a),"NaN ray rejected");check(!bvh.intersect(w.scene,{{0,0,0},{0,0,-1}},nan,10,a),"NaN interval rejected");
     Ray r{{0,0,1},{0,0,-1}};a.set(r,1,{0,0,1},0);double cosine=0;

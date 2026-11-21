@@ -64,6 +64,13 @@ check_film(19 11 64)
 check_film(7 11 2 --width 7 --spp 2)
 check_film(19 5 1 --height 5 --spp 1)
 check_film(23 9 3 --width 23 --height 9 --spp 3)
+foreach(split IN ITEMS median sah)
+  check_film(23 9 3 --width 23 --height 9 --spp 3 --bvh ${split})
+  file(SHA256 "${work}/path.ppm" ${split}_hash)
+endforeach()
+if(NOT median_hash STREQUAL sah_hash)
+  message(FATAL_ERROR "Changing --bvh changed the rock image")
+endif()
 set_film("\"width\":8")
 check_film(8 256 1 --spp 1)
 
@@ -76,7 +83,8 @@ foreach(value IN ITEMS 0 -2 2.5 16385 "\"3\"" true 18446744073709551615)
   endif()
 endforeach()
 
-foreach(args IN ITEMS "--width;0" "--height;16385" "--spp;-1" "--spp;1.5" "--spp;2147483648" "--width;1;--width;2")
+foreach(args IN ITEMS "--width;0" "--height;16385" "--spp;-1" "--spp;1.5" "--spp;2147483648" "--width;1;--width;2"
+    "--bvh;unknown" "--bvh;median;--bvh;sah" "--bvh")
   execute_process(COMMAND "${TRACER}" --scene forest.json ${args} WORKING_DIRECTORY "${work}"
     RESULT_VARIABLE status ERROR_VARIABLE error)
   if(status STREQUAL "0" OR NOT error MATCHES "Usage:")

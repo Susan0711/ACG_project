@@ -14,6 +14,7 @@ namespace {
 struct Options {
     std::filesystem::path scene_path;
     std::optional<int> width, height, spp, threads;
+    std::optional<BVHSplit> bvh;
 };
 
 bool read_option(std::string_view text, int maximum, std::optional<int>& option) {
@@ -41,6 +42,10 @@ bool parse_arguments(int argc, char** argv, Options& options) {
             if (!read_option(value, std::numeric_limits<int>::max(), options.spp)) return false;
         } else if (option == "--threads") {
             if (!read_option(value, RenderSettings::max_threads, options.threads)) return false;
+        } else if (option == "--bvh" && !options.bvh) {
+            if (value == "median") options.bvh = BVHSplit::median;
+            else if (value == "sah") options.bvh = BVHSplit::sah;
+            else return false;
         } else {
             return false;
         }
@@ -57,7 +62,7 @@ int main(int argc, char** argv) {
         if (!parse_arguments(argc, argv, options)) {
             std::cerr << "Usage: path_tracer --scene <file.json> [--width <1-" << FilmSize::max_dimension
                       << ">] [--height <1-" << FilmSize::max_dimension << ">] [--spp <positive integer>] [--threads <1-"
-                      << RenderSettings::max_threads << ">]\n";
+                      << RenderSettings::max_threads << ">] [--bvh median|sah]\n";
             return 1;
         }
         if (!path.has_parent_path()) path = std::filesystem::path("scene") / path;
@@ -71,7 +76,7 @@ int main(int argc, char** argv) {
 
         const int width = options.width.value_or(world.film_size.width);
         const int height = options.height.value_or(world.film_size.height);
-        RenderScene scene(std::move(world));
+        RenderScene scene(std::move(world), Acceleration::bvh, options.bvh.value_or(BVHSplit::median));
         Film film(width, height);
         std::cout << "Prepared RenderScene and Film (" << film.width << 'x' << film.height << ")\n";
 

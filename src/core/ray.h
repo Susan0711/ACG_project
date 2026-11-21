@@ -1,5 +1,7 @@
 #pragma once
 #include "core/vec3.h"
+#include <cstddef>
+#include <limits>
 
 struct Ray {
     Vec3 origin, direction;
@@ -17,7 +19,11 @@ struct HitRecord {
     Vec3 normal{};          // Shading normal oriented towards the incident ray's origin.
     bool front_face{};
     int material_id{};
+    // Filled by scene-level queries after choosing the closest primitive.
+    static constexpr std::size_t no_object = std::numeric_limits<std::size_t>::max();
+    std::size_t object_index = no_object;
     void set(const Ray& ray, double parameter, Vec3 outward, int material) {
+        object_index = no_object;
         time = ray.time;
         t = parameter; position = ray.at(t); outward_normal = outward;
         front_face = ray.direction.dot(outward) < 0;

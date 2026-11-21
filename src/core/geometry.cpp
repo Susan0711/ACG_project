@@ -43,10 +43,15 @@ bool Triangle::intersect(const Ray& ray, double lo, double hi, HitRecord& hit) c
 }
 bool Scene::intersect(const Ray& ray, double lo, double hi, HitRecord& hit) const {
     bool found=false;
-    for (const auto& object : objects) {
+    for (std::size_t index = 0; index < objects.size(); ++index) {
         HitRecord candidate;
-        if (std::visit([&](const auto& shape) { return shape.intersect(ray,lo,hi,candidate); },object)) {
-            if (!found || candidate.t < hi) { hit=candidate; hi=candidate.t; found=true; }
+        if (std::visit([&](const auto& shape) { return shape.intersect(ray,lo,hi,candidate); },objects[index])) {
+            if (!found || candidate.t < hi) {
+                hit = candidate;
+                hit.object_index = index;
+                hi = candidate.t;
+                found = true;
+            }
         }
     }
     return found;

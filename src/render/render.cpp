@@ -3,11 +3,11 @@
 #include <stdexcept>
 #include <utility>
 
-RenderScene::RenderScene(World world, Acceleration backend) : world_(std::move(world)) {
+RenderScene::RenderScene(World world, Acceleration backend, BVHSplit split) : world_(std::move(world)) {
     const Camera& camera = world_.camera;
     camera.validate();
     if (backend == Acceleration::bvh) {
-        bvh_.emplace().build(world_.scene, camera.shutter_open, camera.shutter_close);
+        bvh_.emplace().build(world_.scene, camera.shutter_open, camera.shutter_close, split);
     }
 }
 

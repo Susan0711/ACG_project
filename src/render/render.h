@@ -8,7 +8,7 @@ enum class Acceleration { linear, bvh };
 // Own the geometry and its index together for the lifetime of a render.
 class RenderScene {
 public:
-    explicit RenderScene(World world, Acceleration backend = Acceleration::bvh);
+    explicit RenderScene(World world, Acceleration backend = Acceleration::bvh, BVHSplit split = BVHSplit::median);
     const Camera& camera() const { return world_.camera; }
     const Lighting& lights() const { return world_.lights; }
     const Material& material(const HitRecord& hit) const { return world_.materials.at(hit.material_id); }

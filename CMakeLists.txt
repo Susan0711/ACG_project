@@ -39,6 +39,8 @@ target_include_directories(scene_input SYSTEM PRIVATE third_party)
 target_link_libraries(scene_input PUBLIC tracer)
 add_executable(path_tracer src/main.cpp)
 target_link_libraries(path_tracer PRIVATE scene_input)
+add_executable(bvh_compare EXCLUDE_FROM_ALL tools/bvh_compare.cpp)
+target_link_libraries(bvh_compare PRIVATE scene_input)
 
 include(CTest)
 if(BUILD_TESTING)

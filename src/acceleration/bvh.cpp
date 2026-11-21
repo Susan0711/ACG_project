@@ -1,5 +1,6 @@
 #include "acceleration/bvh.h"
 #include <algorithm>
+#include <array>
 #include <numeric>
 #include <limits>
 namespace {
@@ -28,6 +29,80 @@ namespace {
                          [&](std::size_t a, std::size_t b) { return center(a) < center(b); });
         return begin + (end - begin) / 2;
     }
+
+    constexpr int bucket_count = 12;
+
+    struct Bucket {
+        AABB box{};
+        std::size_t count = 0;
+
+        void add(const AABB& other, std::size_t amount = 1) {
+            if (amount == 0) return;
+            box = count == 0 ? other : merge(box, other);
+            count += amount;
+        }
+
+        double weighted_area() const {
+            const Vec3 d = box.hi - box.lo;
+            return count * 2.0 * (d.x * d.y + d.y * d.z + d.z * d.x);
+        }
+    };
+
+    int bucket_index(double center, double low, double extent) {
+        const double fraction = (center - low) / extent;
+        return std::min(bucket_count - 1, static_cast<int>(fraction * bucket_count));
+    }
+
+    std::size_t split_sah(std::vector<std::size_t>& ids, std::size_t begin, std::size_t end,
+                          const std::vector<AABB>& boxes, const std::vector<Vec3>& centers,
+                          const AABB& parent) {
+        // With two primitives there is only one possible grouping.
+        if (end - begin == 2) return split_median(ids, begin, end, boxes, parent);
+
+        AABB center_bounds{centers[ids[begin]], centers[ids[begin]]};
+        for (auto i = begin + 1; i < end; ++i) {
+            const Vec3 c = centers[ids[i]];
+            center_bounds = merge(center_bounds, {c, c});
+        }
+
+        double best_cost = std::numeric_limits<double>::infinity();
+        int best_axis = -1, best_boundary = -1;
+        const Vec3 extent = center_bounds.hi - center_bounds.lo;
+        for (int dim = 0; dim < 3; ++dim) {
+            const double width = axis(extent, dim), low = axis(center_bounds.lo, dim);
+            if (!(width > 0) || !std::isfinite(width)) continue;
+
+            std::array<Bucket, bucket_count> buckets{};
+            for (auto i = begin; i < end; ++i) {
+                const auto id = ids[i];
+                buckets[bucket_index(axis(centers[id], dim), low, width)].add(boxes[id]);
+            }
+
+            // right_of[b] covers buckets (b, last], left covers [0, b].
+            std::array<Bucket, bucket_count - 1> right_of{};
+            Bucket right, left;
+            for (int b = bucket_count - 1; b > 0; --b) {
+                right.add(buckets[b].box, buckets[b].count);
+                right_of[b - 1] = right;
+            }
+            for (int b = 0; b < bucket_count - 1; ++b) {
+                left.add(buckets[b].box, buckets[b].count);
+                if (left.count == 0 || right_of[b].count == 0) continue;
+                const double cost = left.weighted_area() + right_of[b].weighted_area();
+                if (cost < best_cost) {
+                    best_cost = cost;
+                    best_axis = dim;
+                    best_boundary = b;
+                }
+            }
+        }
+        if (best_axis < 0) return split_median(ids, begin, end, boxes, parent);
+        const double low = axis(center_bounds.lo, best_axis), width = axis(extent, best_axis);
+        auto middle = std::stable_partition(ids.begin() + begin, ids.begin() + end, [&](std::size_t id) {
+            return bucket_index(axis(centers[id], best_axis), low, width) <= best_boundary;
+        });
+        return static_cast<std::size_t>(middle - ids.begin());
+    }
 }
 bool AABB::intersect(const Ray& r,double lo,double hi) const {
     if (!finite(r.origin)||!finite(r.direction)||std::isnan(lo)||std::isnan(hi)||lo>hi) return false;
@@ -42,12 +117,17 @@ bool AABB::intersect(const Ray& r,double lo,double hi) const {
         if(lo>hi)return false;
     } return true;
 }
-void BVH::build(const Scene& scene,double time_open,double time_close) {
+void BVH::build(const Scene& scene,double time_open,double time_close,BVHSplit split) {
     std::vector<Node> built;
     std::vector<AABB> boxes;
     boxes.reserve(scene.objects.size());
     for (const auto& object : scene.objects) {
         boxes.push_back(std::visit([&](const auto& shape) { return bounds(shape, time_open, time_close); }, object));
+    }
+    std::vector<Vec3> centers;
+    if (split == BVHSplit::sah) {
+        centers.reserve(boxes.size());
+        for (const AABB& box : boxes) centers.push_back(box.lo * 0.5 + box.hi * 0.5);
     }
     std::vector<std::size_t> ids(boxes.size());
     std::iota(ids.begin(), ids.end(), std::size_t{0});
@@ -59,7 +139,9 @@ void BVH::build(const Scene& scene,double time_open,double time_close) {
         if (end - begin == 1) {
             built[index].object = ids[begin];
         } else {
-            const auto mid = split_median(ids, begin, end, boxes, box);
+            const auto mid = split == BVHSplit::sah
+                ? split_sah(ids, begin, end, boxes, centers, box)
+                : split_median(ids, begin, end, boxes, box);
             const int left = self(self, begin, mid);
             const int right = self(self, mid, end);
             built[index].left = left;
@@ -70,16 +152,17 @@ void BVH::build(const Scene& scene,double time_open,double time_close) {
     if (!ids.empty()) build_range(build_range, 0, ids.size());
     nodes.swap(built);
 }
-bool BVH::intersect(const Scene& scene,const Ray& ray,double lo,double hi,HitRecord& hit) const {
+bool BVH::intersect(const Scene& scene,const Ray& ray,double lo,double hi,HitRecord& hit,BVHTraversalStats* stats) const {
     bool found=false;
-    std::size_t best=std::numeric_limits<std::size_t>::max();
     auto visit=[&](auto&& self,int index)->void { const auto& n=nodes[index];
+        if (stats) ++stats->box_tests;
         if(!n.box.intersect(ray,lo,hi))return;
         if(n.left<0) { HitRecord h;
-            if(std::visit([&](const auto& s){return s.intersect(ray,lo,hi,h);},scene.objects[n.object])&&(!found||h.t<hi||(h.t==hi&&n.object<best))) {found=true;
+            if (stats) ++stats->primitive_tests;
+            if(std::visit([&](const auto& s){return s.intersect(ray,lo,hi,h);},scene.objects[n.object])&&(!found||h.t<hi||(h.t==hi&&n.object<hit.object_index))) {found=true;
                 hi=h.t;
                 hit=h;
-                best=n.object;
+                hit.object_index=n.object;
             } }
         else {self(self,n.left);
             self(self,n.right);

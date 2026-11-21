@@ -59,14 +59,16 @@ void check_scene_preparation() {
     world.camera.shutter_open = -1;
     world.camera.shutter_close = 2;
     world.scene.objects.push_back(Sphere{{0,0,0}, 1, 0, {2,0,0}});
-    RenderScene indexed(world, Acceleration::bvh), linear(world, Acceleration::linear);
+    RenderScene indexed(world, Acceleration::bvh), sah(world, Acceleration::bvh, BVHSplit::sah),
+                linear(world, Acceleration::linear);
     world.scene.objects.clear();
     for (double time : {-1.0, 0.5, 2.0, 10.0}) {
         const Ray ray{{2*time,0,3}, {0,0,-1}, time};
-        HitRecord a, b;
-        require(indexed.intersect(ray, 0, 5, a) && linear.intersect(ray, 0, 5, b),
-                "Prepared geometry must cover the final shutter interval and own its data");
-        require(a.t == 2 && a.t == b.t && a.time == time && b.time == time, "Backend equivalence");
+        for (const RenderScene* scene : {&indexed, &sah, &linear}) {
+            HitRecord hit;
+            require(scene->intersect(ray, 0, 5, hit), "Prepared geometry must own its data and handle query time");
+            require(hit.t == 2 && hit.time == time && hit.object_index == 0, "Backend equivalence");
+        }
     }
 }
 }
