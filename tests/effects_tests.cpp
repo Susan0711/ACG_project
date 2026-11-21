@@ -13,8 +13,38 @@ World layers(double alpha,int count,bool opaque=false) {
     if(opaque) w.scene.objects.push_back(Triangle{{-10,-10,-5},{10,-10,-5},{0,10,-5},1});
     return w;
 }
+void check_medium() {
+    const Ray ray{{0, 0, -1}, {0, 0, 2}};
+    World world;
+    world.lights.background = {1, 1, 1};
+    world.medium = {{{-1, -1, 0}, {1, 1, 4}}, 0, 0};
+    Sampler rng{12};
+    const auto before = rng.state;
+    check(integrate(RenderScene(world), ray, rng, 0).x == 1 && rng.state == before,
+          "zero density preserves radiance and sampler state");
+
+    world.medium.density = 0.2;
+    const RenderScene absorbing(world);
+    check(std::abs(absorbing.shadow_transmittance(ray, 1.5) - std::exp(-0.4)) < 1e-12,
+          "transmission clips to the endpoint and uses world-space length");
+    double sum = 0;
+    for (int i = 0; i < 8192; ++i) sum += integrate(absorbing, ray, rng, 0).x;
+    check(std::abs(sum / 8192 - std::exp(-0.8)) < 0.025, "camera transmission across absorbing fog");
+
+    world.lights.background = {};
+    world.lights.points.push_back({{0, 2, 2}, {1, 1, 1}});
+    world.medium.albedo = 0.9;
+    const RenderScene scattering(world);
+    for (auto mode : {SamplingMode::nee, SamplingMode::mis}) {
+        double scattered = 0;
+        for (int i = 0; i < 64; ++i) scattered += integrate(scattering, ray, rng, 1, mode).x;
+        check(std::isfinite(scattered) && scattered > 0, "point light scatters into the camera ray");
+    }
+}
+
 int main() {
     try {
+        check_medium();
         Camera c;
         Sampler rng{12}; auto before=rng.state;
         Ray a=c.generate(.3,.6,1),b=c.sample(.3,.6,1,rng);
@@ -76,6 +106,6 @@ int main() {
         check(rejected,"emitter alpha rejected");
         Texture data;data.load("assets/test_colors.ppm",false);
         check(std::abs(data.value({.25,.25}).x-128.0/255)<1e-12,"opacity linear data");
-        std::cout<<"PASS camera, disk, motion BVH, time, alpha boundaries/layers/statistics\n";
+        std::cout<<"PASS camera, disk, motion BVH, time, alpha layers and homogeneous fog\n";
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

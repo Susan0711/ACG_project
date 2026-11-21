@@ -1,5 +1,6 @@
 #pragma once
 #include "render/camera.h"
+#include "render/medium.h"
 #include "core/geometry.h"
 #include "lighting/lights.h"
 #include "materials/material.h"
@@ -16,5 +17,6 @@ struct World {
     Lighting lights;
     Camera camera;
     FilmSize film_size;
+    HomogeneousMedium medium;
     void add_area(AreaLight light);
 };

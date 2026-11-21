@@ -105,6 +105,9 @@ namespace {
     }
 }
 bool AABB::intersect(const Ray& r,double lo,double hi) const {
+    return clip_interval(r, lo, hi);
+}
+bool AABB::clip_interval(const Ray& r,double& lo,double& hi) const {
     if (!finite(r.origin)||!finite(r.direction)||std::isnan(lo)||std::isnan(hi)||lo>hi) return false;
     for(int a=0;a<3;++a) { double o=axis(r.origin,a),d=axis(r.direction,a),mn=axis(this->lo,a),mx=axis(this->hi,a);
         if(d==0) { if(o<mn||o>mx)return false;

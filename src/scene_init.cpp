@@ -41,6 +41,20 @@ Camera read_camera(const Json& entry) {
     return camera;
 }
 
+HomogeneousMedium read_medium(const Json& entry) {
+    json_fields::expect_fields(entry, {"min", "max", "density", "albedo"});
+    const Vec3 lo = json_fields::vector3(entry, "min"), hi = json_fields::vector3(entry, "max");
+    if (!finite(lo) || !finite(hi) || lo.x >= hi.x || lo.y >= hi.y || lo.z >= hi.z)
+        throw std::runtime_error("medium.min must be below medium.max on each axis, with finite bounds");
+    const double density = json_fields::number(entry.at("density"), "medium.density");
+    const double albedo = json_fields::number(entry.at("albedo"), "medium.albedo");
+    if (!std::isfinite(density) || density < 0)
+        throw std::runtime_error("medium.density must be finite and nonnegative");
+    if (!std::isfinite(albedo) || albedo < 0 || albedo > 1)
+        throw std::runtime_error("medium.albedo must be in [0, 1]");
+    return {{lo, hi}, density, albedo};
+}
+
 void add_light(World& world, const Json& entry, const std::filesystem::path& directory) {
     const auto type = entry.at("type").get<std::string>();
     if (type == "point") {
@@ -80,7 +94,7 @@ World load_scene_file(const std::filesystem::path& path) {
     std::ifstream input(path);
     if (!input) throw std::runtime_error("Cannot open scene file: " + path.u8string());
     const Json scene = Json::parse(input);
-    json_fields::expect_fields(scene, {"camera", "materials", "objects", "lights", "film"});
+    json_fields::expect_fields(scene, {"camera", "materials", "objects", "lights", "film", "medium"});
 
     World world;
     if (scene.contains("film")) {
@@ -90,6 +104,7 @@ World load_scene_file(const std::filesystem::path& path) {
         world.film_size.height = film_dimension(film, "height", world.film_size.height);
     }
     world.camera = read_camera(scene.at("camera"));
+    if (scene.contains("medium")) world.medium = read_medium(scene.at("medium"));
 
     std::map<std::string, int> material_ids;
     for (const auto& [name, entry] : scene.at("materials").get_ref<const Json::object_t&>()) {

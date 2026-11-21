@@ -28,7 +28,7 @@ add_library(tracer
   src/io/assets.cpp
   src/lighting/environment.cpp src/lighting/lights.cpp
   src/world.cpp src/render_scene.cpp
-  src/render/path_integrator.cpp src/render/direct_lighting.cpp
+  src/render/path_integrator.cpp src/render/direct_lighting.cpp src/render/medium.cpp
   src/render/camera.cpp src/render/film.cpp src/render/render.cpp)
 target_link_libraries(tracer PUBLIC acceleration materials Threads::Threads)
 

@@ -28,12 +28,20 @@ double RenderScene::visibility(const HitRecord& hit, const LightSample& light) c
         distance = std::sqrt(offset.dot(offset));
         if (distance <= 1e-5) return 0;
         shadow.direction = offset * (1 / distance);
-        distance -= 1e-5;
     }
-    return shadow_transmittance(shadow, distance);
+    return visibility_to_light(shadow, distance);
 }
 
-double RenderScene::shadow_transmittance(Ray ray, double distance) const {
+double RenderScene::visibility_to_light(const Ray& shadow, double distance) const {
+    // Exclude the sampled light surface from blockers, but attenuate the full segment.
+    return medium().transmittance(shadow, distance) * surface_transmittance(shadow, distance - 1e-5);
+}
+
+double RenderScene::shadow_transmittance(Ray ray, double t_max) const {
+    return medium().transmittance(ray, t_max) * surface_transmittance(ray, t_max);
+}
+
+double RenderScene::surface_transmittance(const Ray& ray, double distance) const {
     double transmission = 1, minimum = 0;
     for (int crossing = 0; crossing < 4096; ++crossing) {
         HitRecord hit;

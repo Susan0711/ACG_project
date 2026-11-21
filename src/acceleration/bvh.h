@@ -11,6 +11,7 @@ struct BVHTraversalStats {
 
 struct AABB { Vec3 lo,hi;
     bool intersect(const Ray&,double,double) const;
+    bool clip_interval(const Ray&, double& enter, double& exit) const;
 };
 struct BVH {
     struct Node { AABB box;
