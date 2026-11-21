@@ -17,6 +17,7 @@ public:
     const Lighting& lights() const { return world_.lights; }
     const Medium& medium() const { return world_.medium; }
     const Material& material(const HitRecord& hit) const { return world_.materials.at(hit.material_id); }
+    const std::vector<Material>& materials() const { return world_.materials; }
     bool intersect(const Ray&, double minimum, double maximum, HitRecord&) const;
     void apply_surface_maps(const Ray&, HitRecord&) const;
     const Scene& geometry() const { return world_.scene; }

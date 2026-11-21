@@ -1,5 +1,8 @@
 #include "acceleration/bvh_cuda.h"
 #include "acceleration/intersection_fp32.cuh"
+#include "acceleration/shadow_fp32.cuh"
+#include "materials/material.h"
+#include <math_constants.h>
 #include <algorithm>
 #include <chrono>
 #include <climits>
@@ -7,6 +10,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace {
 void check(cudaError_t result, const char* operation) {
@@ -47,28 +51,35 @@ fp32::V pack_geometry(Vec3 v) {
         throw std::range_error("GPU geometry exceeds the FP32 coordinate range");
     return pack(v);
 }
-__global__ void intersect_rays(const fp32::Node* nodes, int count_nodes,
-                               const fp32::Triangle* triangles, const fp32::Sphere* spheres,
-                               const fp32::Ray* queries, fp32::Hit* hits, int count) {
-    const int i = blockIdx.x*blockDim.x + threadIdx.x;
-    if (i >= count) return;
-    const fp32::Ray ray = queries[i];
-    fp32::Hit best;
-    hits[i] = best;
-    if (!(ray.minimum <= ray.maximum) || !isfinite(ray.time)) return;
-    fp32::SlabAxis axes[3];
+__device__ bool prepare_ray(const fp32::Ray& ray, fp32::SlabAxis axes[3]) {
+    if (!(ray.minimum <= ray.maximum) || !isfinite(ray.time)) return false;
     #pragma unroll
     for (int k=0; k<3; ++k) {
         const float o = fp32::axis(ray.origin,k), d = fp32::axis(ray.direction,k);
-        if (!isfinite(o) || !isfinite(d)) return;
+        if (!isfinite(o) || !isfinite(d)) return false;
         axes[k] = {o,d,d == 0 ? 0 : __frcp_rd(fabsf(d)),d == 0 ? 0 : __frcp_ru(fabsf(d))};
     }
-    if (ray.direction.x == 0 && ray.direction.y == 0 && ray.direction.z == 0) return;
-    const auto projection = fp32::projection(ray.direction);
+    return ray.direction.x != 0 || ray.direction.y != 0 || ray.direction.z != 0;
+}
+struct DeviceBVH {
+    const fp32::Node* nodes;
+    int count;
+    const fp32::Triangle* triangles;
+    const fp32::Sphere* spheres;
+};
+fp32::TexelAxis texel_axis(double a, double b, double c, int period) {
+    const double origin = (a-std::floor(a))*period;
+    const double du = (b-a)*period, dv = (c-a)*period;
+    const float hi = float(origin), u = float(du), v = float(dv);
+    return {hi,u,v,float(origin-hi),float(du-u),float(dv-v)};
+}
+__device__ fp32::Hit closest(DeviceBVH tree, const fp32::Ray& ray,
+                             const fp32::SlabAxis axes[3], fp32::Projection projection) {
+    fp32::Hit best;
     float maximum = ray.maximum;
     int cursor = 0;
-    while (cursor < count_nodes) {
-        const auto& node = nodes[cursor];
+    while (cursor < tree.count) {
+        const auto& node = tree.nodes[cursor];
         if (!fp32::box_hit(node,axes,ray.minimum,maximum)) {
             cursor = node.end;
             continue;
@@ -76,8 +87,8 @@ __global__ void intersect_rays(const fp32::Node* nodes, int count_nodes,
         if (node.object >= 0) {
             fp32::Hit h;
             const bool found = node.shape >= 0
-                ? fp32::triangle_hit(triangles[node.shape],ray,projection,maximum,h)
-                : fp32::sphere_hit(spheres[~node.shape],ray,maximum,h);
+                ? fp32::triangle_hit(tree.triangles[node.shape],ray,projection,maximum,h)
+                : fp32::sphere_hit(tree.spheres[~node.shape],ray,maximum,h);
             if (found && (best.object < 0 || h.t < maximum || (h.t == maximum && node.object < best.object))) {
                 h.object = node.object;
                 best = h;
@@ -86,7 +97,94 @@ __global__ void intersect_rays(const fp32::Node* nodes, int count_nodes,
         }
         ++cursor;
     }
-    hits[i] = best;
+    return best;
+}
+__global__ void intersect_rays(DeviceBVH tree, const fp32::Ray* queries, fp32::Hit* hits, int count) {
+    const int i = blockIdx.x*blockDim.x + threadIdx.x;
+    if (i >= count) return;
+    const auto ray = queries[i];
+    fp32::SlabAxis axes[3];
+    hits[i] = prepare_ray(ray,axes) ? closest(tree,ray,axes,fp32::projection(ray.direction)) : fp32::Hit{};
+}
+// Keep the nearest few distinct layers in one DFS pass. Equal FP32 distances
+// select the lowest object ID, exactly as in closest(). A full list narrows
+// the traversal interval without losing any hit before its last entry.
+struct ShadowLayers {
+    static constexpr int capacity = 8;
+    fp32::Hit hits[capacity];
+    int size = 0;
+    float maximum;
+    __device__ void insert(fp32::Hit hit, bool opaque) {
+        int i = 0;
+        while (i < size && hits[i].t < hit.t) ++i;
+        if (i < size && hits[i].t == hit.t) {
+            if (hits[i].object <= hit.object) return;
+        } else {
+            if (i == capacity) return;
+            if (size < capacity) ++size;
+            for (int j=size-1; j>i; --j) hits[j] = hits[j-1];
+        }
+        hits[i] = hit;
+        if (opaque) {
+            size = i+1;
+            maximum = hit.t;
+        } else if (size == capacity) {
+            maximum = hits[size-1].t;
+        }
+    }
+};
+__device__ void collect_layers(DeviceBVH tree, fp32::ShadowData data, const fp32::Ray& ray,
+                               const fp32::SlabAxis axes[3], fp32::Projection projection, ShadowLayers& layers) {
+    for (int cursor=0; cursor<tree.count;) {
+        const auto& node = tree.nodes[cursor];
+        if (!fp32::box_hit(node,axes,ray.minimum,layers.maximum)) {
+            cursor = node.end;
+            continue;
+        }
+        ++cursor;
+        if (node.object < 0) continue;
+        fp32::Hit hit;
+        const bool found = node.shape >= 0
+            ? fp32::triangle_hit(tree.triangles[node.shape],ray,projection,layers.maximum,hit)
+            : fp32::sphere_hit(tree.spheres[~node.shape],ray,layers.maximum,hit);
+        if (!found) continue;
+        hit.object = node.object;
+        const bool opaque = data.surfaces[hit.object].material < 0;
+        layers.insert(hit,opaque);
+        if (node.shape < 0 && hit.t < layers.maximum) {
+            auto exit_ray = ray;
+            exit_ray.minimum = nextafterf(hit.t,CUDART_INF_F);
+            if (fp32::sphere_hit(tree.spheres[~node.shape],exit_ray,layers.maximum,hit))
+                layers.insert(hit,opaque);
+        }
+    }
+}
+__global__ void shadow_segments(DeviceBVH tree, fp32::ShadowData data, const fp32::Ray* queries,
+                                float* results, int count) {
+    const int i = blockIdx.x*blockDim.x + threadIdx.x;
+    if (i >= count) return;
+    auto ray = queries[i];
+    float transmission = 1.0f;
+    fp32::SlabAxis axes[3];
+    if (prepare_ray(ray,axes)) {
+        const auto projection = fp32::projection(ray.direction);
+        int crossings = 0;
+        while (ray.minimum <= ray.maximum) {
+            ShadowLayers layers;
+            layers.maximum = ray.maximum;
+            collect_layers(tree,data,ray,axes,projection,layers);
+            for (int j=0; j<layers.size; ++j) {
+                const float alpha = fp32::surface_alpha(data,tree.spheres,ray,layers.hits[j]);
+                if (!(alpha >= 0 && alpha <= 1)) { transmission = -2; break; }
+                transmission *= 1-alpha;
+                if (transmission == 0) break;
+                if (++crossings >= 4096) { transmission = -1; break; }
+            }
+            if (transmission <= 0 || layers.maximum == ray.maximum) break;
+            ray.minimum = nextafterf(layers.maximum,CUDART_INF_F);
+        }
+    }
+    results[i] = transmission;
 }
 }
 
@@ -97,6 +195,12 @@ struct CudaBVH::Storage {
     DeviceBuffer<fp32::Sphere> spheres;
     DeviceBuffer<fp32::Ray> queries;
     DeviceBuffer<fp32::Hit> hits;
+    DeviceBuffer<fp32::ShadowSurface> surfaces;
+    DeviceBuffer<fp32::TriangleUV> uvs;
+    DeviceBuffer<fp32::NearestUV> nearest_uvs;
+    DeviceBuffer<fp32::AlphaMaterial> materials;
+    DeviceBuffer<fp32::AlphaTexture> textures;
+    DeviceBuffer<float> texels, transmission;
     std::vector<fp32::Ray> host_queries;
     std::vector<fp32::Hit> host_hits;
     Event begin, end;
@@ -104,7 +208,9 @@ struct CudaBVH::Storage {
     Statistics timing;
 };
 
-CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene) : storage_(std::make_unique<Storage>()) {
+CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene) : CudaBVH(bvh,scene,{}) {}
+CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene, const std::vector<Material>& materials)
+    : storage_(std::make_unique<Storage>()) {
     if (bvh.nodes.size() > INT_MAX) throw std::length_error("GPU BVH exceeds 32-bit node indices");
     auto& gpu = *storage_;
     if (!bvh.nodes.empty()) {
@@ -115,6 +221,36 @@ CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene) : storage_(std::make_unique
     std::vector<fp32::Node> nodes(bvh.nodes.size());
     std::vector<fp32::Triangle> triangles;
     std::vector<fp32::Sphere> spheres;
+    std::vector<fp32::ShadowSurface> surfaces(materials.empty() ? 0 : scene.objects.size());
+    std::vector<fp32::TriangleUV> uvs;
+    std::vector<fp32::NearestUV> nearest_uvs;
+    std::vector<fp32::AlphaTexture> textures;
+    std::vector<fp32::AlphaMaterial> alpha_materials;
+    std::vector<float> texels;
+    std::unordered_map<const Texture*,int> texture_indices;
+    for (const auto& material : materials) {
+        if (material.is_emitter() && (material.opacity != 1 || material.opacity_map))
+            throw std::invalid_argument("Emissive alpha is unsupported");
+        int texture = -1;
+        if (const auto* t = material.opacity_map.get()) {
+            const auto entry = texture_indices.emplace(t,int(textures.size()));
+            texture = entry.first->second;
+            if (entry.second) {
+                using Filter = fp32::AlphaFilter;
+                Filter filter = Filter::constant;
+                if (t->type == Texture::Type::procedural) filter = Filter::procedural;
+                if (t->type == Texture::Type::image)
+                    filter = t->filter() == Texture::Filter::nearest ? Filter::nearest : Filter::bilinear;
+                textures.push_back({filter,float(t->color.x),t->width,t->height,texels.size()});
+                if (t->type == Texture::Type::image) {
+                    if (t->width <= 0 || t->height <= 0 || t->pixels.size() != size_t(t->width)*t->height)
+                        throw std::invalid_argument("Invalid opacity image dimensions");
+                    for (const auto& p : t->pixels) texels.push_back(float(p.x));
+                }
+            }
+        }
+        alpha_materials.push_back({float(material.opacity),texture});
+    }
     // Refit the same DFS topology to enclose the rounded leaves.
     for (std::size_t end = nodes.size(); end > 0; --end) {
         const auto index = end-1;
@@ -150,6 +286,26 @@ CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene) : storage_(std::make_unique
             n.shape = ~int(spheres.size());
             spheres.push_back({pack_geometry(position),pack_geometry(velocity),static_cast<float>(radius)});
         }
+        if (!materials.empty()) {
+            const int material = std::visit([](const auto& s){ return s.material_id; },shape);
+            const auto& m = materials.at(material);
+            auto& surface = surfaces[src.object];
+            surface = {material,n.shape};
+            if (!m.opacity_map && m.opacity == 1) surface.material = -1;
+            if (n.shape >= 0 && m.opacity_map && m.opacity_map->type != Texture::Type::constant) {
+                const auto& t = std::get<Triangle>(shape);
+                const auto& texture = *m.opacity_map;
+                if (texture.type == Texture::Type::image && texture.filter() == Texture::Filter::nearest) {
+                    surface.uv_index = int(nearest_uvs.size());
+                    nearest_uvs.push_back({texel_axis(t.ta.u,t.tb.u,t.tc.u,texture.width),
+                                           texel_axis(t.ta.v,t.tb.v,t.tc.v,texture.height)});
+                } else {
+                    surface.uv_index = int(uvs.size());
+                    uvs.push_back({{float(t.ta.u),float(t.ta.v)},{float(t.tb.u),float(t.tb.v)},
+                                   {float(t.tc.u),float(t.tc.v)}});
+                }
+            }
+        }
         const Vec3 lo = src.box.lo-gpu.origin, hi = src.box.hi-gpu.origin;
         const double low[]{lo.x,lo.y,lo.z}, high[]{hi.x,hi.y,hi.z};
         const double at_zero[]{position.x,position.y,position.z}, speed[]{velocity.x,velocity.y,velocity.z};
@@ -165,6 +321,13 @@ CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene) : storage_(std::make_unique
     gpu.nodes.upload(nodes);
     gpu.triangles.upload(triangles);
     gpu.spheres.upload(spheres);
+    gpu.surfaces.upload(surfaces);
+    gpu.uvs.upload(uvs);
+    gpu.nearest_uvs.upload(nearest_uvs);
+    gpu.materials.upload(alpha_materials);
+    gpu.textures.upload(textures);
+    gpu.texels.upload(texels);
+    gpu.transmission.allocate(capacity);
     gpu.queries.allocate(capacity);
     gpu.hits.allocate(capacity);
     gpu.host_queries.resize(capacity);
@@ -173,9 +336,19 @@ CudaBVH::CudaBVH(const BVH& bvh, const Scene& scene) : storage_(std::make_unique
 CudaBVH::~CudaBVH() = default;
 CudaBVH::Statistics CudaBVH::stats() const { return storage_->timing; }
 void CudaBVH::intersect(const RayQuery* queries, GeometryHit* hits, int count) {
-    if (count < 0 || count > capacity) throw std::length_error("Invalid GPU batch size");
+    intersect_batch(queries,hits,count,nullptr,0);
+}
+void CudaBVH::intersect_batch(const RayQuery* queries, GeometryHit* hits, int main_count,
+                              float* transmission, int shadow_count) {
+    if (main_count < 0 || shadow_count < 0 || main_count > capacity-shadow_count)
+        throw std::length_error("Invalid GPU batch size");
+    const int count = main_count + shadow_count;
     if (!count) return;
     auto& g = *storage_;
+    if ((main_count && !hits) || (shadow_count && !transmission) || !queries)
+        throw std::invalid_argument("Missing GPU batch buffer");
+    if (shadow_count && g.node_count && !g.surfaces.ptr)
+        throw std::logic_error("Shadow queries require scene materials");
     const auto start = std::chrono::steady_clock::now();
     for (int i=0;i<count;++i) {
         const RayQuery& r = queries[i];
@@ -186,12 +359,30 @@ void CudaBVH::intersect(const RayQuery* queries, GeometryHit* hits, int count) {
     }
     check(cudaMemcpy(g.queries.ptr, g.host_queries.data(), count*sizeof(fp32::Ray), cudaMemcpyHostToDevice), "upload rays");
     check(cudaEventRecord(g.begin.handle), "record start");
-    intersect_rays<<<(count+255)/256,256>>>(g.nodes.ptr, g.node_count, g.triangles.ptr, g.spheres.ptr,
-                                             g.queries.ptr, g.hits.ptr, count);
-    check(cudaGetLastError(), "launch intersect_rays");
+    const DeviceBVH tree{g.nodes.ptr,g.node_count,g.triangles.ptr,g.spheres.ptr};
+    if (main_count) {
+        intersect_rays<<<(main_count+255)/256,256>>>(tree,g.queries.ptr,g.hits.ptr,main_count);
+        check(cudaGetLastError(), "launch intersect_rays");
+    }
+    if (shadow_count) {
+        const fp32::ShadowData data{g.surfaces.ptr,g.uvs.ptr,g.nearest_uvs.ptr,g.materials.ptr,g.textures.ptr,g.texels.ptr};
+        const auto* rays = g.queries.ptr+main_count;
+        auto* result = g.transmission.ptr;
+        const int blocks = (shadow_count+255)/256;
+        shadow_segments<<<blocks,256>>>(tree,data,rays,result,shadow_count);
+        check(cudaGetLastError(), "launch shadow_segments");
+    }
     check(cudaEventRecord(g.end.handle), "record end");
-    check(cudaMemcpy(g.host_hits.data(), g.hits.ptr, count*sizeof(fp32::Hit), cudaMemcpyDeviceToHost), "download hits");
-    for (int i=0;i<count;++i) {
+    if (shadow_count) {
+        check(cudaMemcpy(transmission,g.transmission.ptr,shadow_count*sizeof(float),cudaMemcpyDeviceToHost), "download visibility");
+        for (int i=0;i<shadow_count;++i) {
+            if (transmission[i] == -1) throw std::runtime_error("Shadow crossing limit exceeded");
+            if (transmission[i] == -2) throw std::runtime_error("Opacity must be linear coverage in [0,1]");
+        }
+    }
+    if (main_count)
+        check(cudaMemcpy(g.host_hits.data(), g.hits.ptr, main_count*sizeof(fp32::Hit), cudaMemcpyDeviceToHost), "download hits");
+    for (int i=0;i<main_count;++i) {
         const auto& h = g.host_hits[i];
         hits[i] = {{h.t,h.u,h.v},h.object};
     }

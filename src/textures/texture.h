@@ -13,6 +13,7 @@ struct Texture {
     void load(const std::filesystem::path& path, bool decode_srgb=true, Filter filter=Filter::nearest);
     Vec3 value(UV uv, double lod=0) const;
     int last_level() const { return static_cast<int>(lower_levels_.size()); }
+    Filter filter() const { return filter_; }
 
 private:
     struct Level { int width, height; std::vector<Vec3> pixels; };

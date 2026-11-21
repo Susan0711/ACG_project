@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
         std::unique_ptr<CudaBVH> gpu;
         if (options.gpu.value_or(false)) {
             const auto upload = std::chrono::steady_clock::now();
-            gpu = std::make_unique<CudaBVH>(scene.bvh(), scene.geometry());
+            gpu = std::make_unique<CudaBVH>(scene.bvh(), scene.geometry(), scene.materials());
             std::cout << "gpu_prepare_seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now()-upload).count() << '\n';
         }
         QueueStats queue;

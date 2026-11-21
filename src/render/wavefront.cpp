@@ -52,8 +52,6 @@ struct Lane {
     Vec3 direct_weight{};
     std::vector<DirectLightSample> lights;
     std::size_t light_index = 0;
-    int crossings = 0;
-    double minimum = 0, transmission = 1;
     Vec3 direct{};
     // Keep a single FP32 query ray through successive transparent surfaces.
     // The CPU integrator still measures free flight from its advanced origin.
@@ -81,22 +79,10 @@ void restore_surface_position(const RenderScene& scene, const Ray& ray, const Hi
         hit.position = sphere.center_at(ray.time) + hit.outward_normal*sphere.radius;
     }
 }
-void continue_shadow(const RenderScene& scene, Lane& lane, GeometryHit geometry) {
+void finish_shadow(const RenderScene& scene, Lane& lane, float surface_transmittance) {
     const auto& light = lane.lights[lane.light_index];
-    if (geometry.object >= 0) {
-        const auto hit = finish(scene, light.segment.ray, geometry);
-        lane.transmission *= 1 - scene.material(hit).alpha(hit.uv);
-        if (lane.transmission != 0) {
-            if (++lane.crossings >= 4096) throw std::runtime_error("Shadow crossing limit exceeded");
-            lane.minimum = std::nextafter(hit.t, infinity);
-            return;
-        }
-    }
-    const double visibility = scene.medium().transmittance(light.segment.ray, light.segment.distance) * lane.transmission;
+    const double visibility = scene.medium().transmittance(light.segment.ray, light.segment.distance) * surface_transmittance;
     lane.direct = lane.direct + light.contribution(visibility);
-    lane.transmission = 1;
-    lane.minimum = 0;
-    lane.crossings = 0;
     if (++lane.light_index == lane.lights.size()) {
         lane.path.result = lane.path.result + multiply(lane.direct_weight, lane.direct);
         lane.direct = {};
@@ -118,6 +104,7 @@ QueueStats render_wavefront(const RenderScene& scene, Film& film, const RenderSe
     std::vector<Lane> lanes(capacity);
     std::vector<RayQuery> queries(capacity);
     std::vector<GeometryHit> hits(capacity);
+    std::vector<float> shadow_transmittance(capacity);
     std::vector<int> active, ordered(capacity), free_slots(capacity);
     std::iota(free_slots.begin(), free_slots.end(), 0);
     std::vector<CameraSample> samples;
@@ -155,8 +142,8 @@ QueueStats render_wavefront(const RenderScene& scene, Film& film, const RenderSe
                 stats.peak_paths = std::max(stats.peak_paths, int(active.size()));
             }
             const int count = int(active.size());
-            // Both queues use the same closest-hit kernel. Keep similar rays contiguous
-            // and let an alpha shadow suspend only its own path.
+            // Submit both contiguous queues together. A shadow returns one scalar
+            // regardless of the number of transparent surfaces before its light.
             int main_count = 0;
             for (int slot : active) if (!lanes[slot].has_shadow()) ordered[main_count++] = slot;
             int tail = main_count;
@@ -169,14 +156,14 @@ QueueStats render_wavefront(const RenderScene& scene, Film& film, const RenderSe
                 }
                 else {
                     const auto& segment = lane.lights[lane.light_index].segment;
-                    queries[i] = query(segment.ray, lane.minimum, segment.distance - 1e-5);
+                    queries[i] = query(segment.ray, 0, segment.distance - 1e-5);
                 }
             }
-            gpu.intersect(queries.data(), hits.data(), count);
+            gpu.intersect_batch(queries.data(), hits.data(), main_count, shadow_transmittance.data(), count-main_count);
             parallel_for(count, settings.threads, [&](int i) {
                 Lane& lane = lanes[ordered[i]];
                 if (i >= main_count) {
-                    continue_shadow(scene, lane, hits[i]);
+                    finish_shadow(scene, lane, shadow_transmittance[i-main_count]);
                     return;
                 }
                 HitRecord hit;

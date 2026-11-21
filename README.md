@@ -350,7 +350,7 @@ docs/                    设计、素材来源与阶段记录
 
 ## GPU render
 
-CPU 后端使用 FP64。启用 `--backend=gpu` 后，GPU 上的射线、BVH 包围盒、图元求交和命中参数全部使用 FP32。建树、着色和像素累加仍在 CPU 上使用 FP64。
+CPU 后端使用 FP64。启用 `--backend=gpu` 后，GPU 使用 FP32 计算 BVH 求交和阴影段的表面透射率。CPU 使用 FP64 建树、计算光照与介质衰减并累加像素。
 
 ### C1：单独针对 BVH intersection 的 kernel
 
@@ -371,8 +371,14 @@ mkdir -p compare/cpu compare/gpu
 (cd compare/gpu && ../../build-cuda/path_tracer --scene ../../scene/tidewatch.json --backend=gpu --width 160 --height 90 --spp 32 --threads 8 --mode mis)
 ```
 
-GPU 日志分别记录准备显存的 `gpu_prepare_seconds`、完整采样与着色的 `render_seconds`、纯求交的 `kernel_ms`、含射线上传及命中下载的 `batch_ms`。后两项均为各批累计值，已包含在渲染区间中。`gpu_refill_threshold`、`peak_active`、`refills`、`queries` 和 `batches` 可用于核对阈值实验。
+GPU 日志记录准备显存的 `gpu_prepare_seconds` 和完整渲染的 `render_seconds`。`kernel_ms` 累计各批 CUDA 工作区间，C2 包含主射线求交和阴影可见性查询。`batch_ms` 还包含打包、传输和回收结果。这两项均包含在渲染区间中。`queries` 统计主机提交的射线条目，`batches` 统计提交批次。
 
 #### FP64 转 FP32 时遇到的一个小问题
 
 在高山湖场景里，射线穿过半透明针叶后要继续向前查找。如果只往前挪一点，这点偏移在 FP32 下可能被舍掉，下一次又会命中同一片针叶。现在沿用同一条射线，把下一次查询的距离下界推进到比上次命中距离至少大一个 FP32 刻度的位置，就能越过刚才那一层。
+
+### C2：整条阴影射线的可见性查询
+
+CPU 将起点、方向、快门时间和到光源的距离区间一次交给 GPU。一个 CUDA 线程负责一条阴影段，一次遍历最多收集最近的 8 层，按距离累乘 `T *= 1 - alpha`。遇到完全遮挡就返回 0，穿过 8 层后仍有剩余区间则继续遍历。CPU 每段只接收一个 FP32 表面透射率，再乘上介质透射率并累加该光源的贡献。C2 随 `--backend=gpu` 启用，沿用 C1 的补队列阈值。[阴影遍历](src/acceleration/bvh_cuda.cu) · [不透明度采样](src/acceleration/shadow_fp32.cuh)
+
+在 RTX 5090 上回放高山湖的 76,319 条阴影段，与 C1 相比，最大表面透射率差约为 8.96 × 10⁻⁸。固定阈值 24,576，增强版（384 × 256、32 spp、SAH、MIS、8 个 CPU 线程）三次运行的渲染中位数从 34.64 秒降至 28.97 秒，启动到出图从 51.66 秒降至 45.74 秒。两版输出的 8 位 RGB 图逐像素一致。
