@@ -58,6 +58,7 @@ Vec3 integrate(const RenderScene& scene, Ray ray, Sampler& rng, int depth, Sampl
             const Vec3 direct = direct_lighting(scene, ray, hit, material, rng, mode);
             result = result + multiply(throughput, direct);
             const auto sampled = sample_bsdf(material, ray, hit, rng);
+            if (sampled.pdf <= 0) break;
             throughput = multiply(throughput, sampled.weight);
             previous_delta = sampled.delta;
             previous_pdf = sampled.pdf;

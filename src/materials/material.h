@@ -4,7 +4,7 @@
 #include "core/sampling.h"
 #include <memory>
 
-enum class Kind { diffuse, mirror, glass, emissive };
+enum class Kind { diffuse, mirror, glass, emissive, principled };
 struct Material {
     Kind kind = Kind::diffuse;
     Vec3 color{0.75,0.75,0.75};
@@ -12,7 +12,9 @@ struct Material {
     std::shared_ptr<const Texture> texture{};
     double opacity=1;
     std::shared_ptr<const Texture> opacity_map{};
-    bool has_continuous_bsdf() const { return kind == Kind::diffuse; }
+    double metallic = 0;
+    double roughness = 0.5;
+    bool has_continuous_bsdf() const { return kind == Kind::diffuse || kind == Kind::principled; }
     bool is_emitter() const { return kind == Kind::emissive; }
     double alpha(UV uv) const;
     Vec3 albedo(UV uv) const { return texture ? texture->value(uv) : color; }

@@ -93,15 +93,18 @@ cmake --build build-local --target path_tracer --parallel
 │   └── shutter_close               快门关闭时刻 ≥ 开启时刻，两者省略时固定在 0 秒
 ├── materials                       材质名称 → 材质定义
 │   └── <材质名>                     自定，例如 stone，可被多个物体引用
-│       ├── type                    四选一
+│       ├── type                    五选一
 │       │   ├── "diffuse"           color 或 texture 二选一
 │       │   │   ├── color           常量反照率 [r, g, b]，各通道在 [0, 1] 内
 │       │   │   └── texture         颜色贴图路径（P3 PPM），按 UV 读取反照率
 │       │   ├── "mirror"            color 为镜面反射率 [r, g, b]，各通道在 [0, 1] 内
 │       │   ├── "glass"             ior 为介质折射率，必须大于 0
+│       │   ├── "principled"        color 或 texture 二选一，作为底色
+│       │   │   ├── metallic        可选，金属度 [0, 1]，默认 0
+│       │   │   └── roughness       可选，粗糙度 [0, 1]，默认 0.5
 │       │   └── "emissive"          color 为发射辐亮度 [r, g, b]，各通道 ≥ 0，可大于 1
-│       ├── opacity                 前三类可选，表面覆盖率在 [0, 1] 内，默认 1
-│       └── opacity_map             前三类可选，覆盖率贴图路径（P3 PPM）
+│       ├── opacity                 前四类可选，表面覆盖率在 [0, 1] 内，默认 1
+│       └── opacity_map             前四类可选，覆盖率贴图路径（P3 PPM）
 ├── objects[]                       每项放置一份 OBJ，同一网格可多次摆放
 │   ├── mesh                        三角面 OBJ 路径
 │   ├── position                    0 秒时相对模型原点施加的平移 [x, y, z]
@@ -129,6 +132,7 @@ cmake --build build-local --target path_tracer --parallel
 2. **理想镜面 `mirror`**。潮汐观测站的海面使用 `{"type": "mirror", "color": [0.27, 0.61, 0.7]}`。命中点的法线决定唯一的反射方向，`color` 决定红、绿、蓝三个通道分别保留多少反射光。水面的起伏和法线来自 OBJ，镜面材质负责沿该方向继续追踪。
 3. **理想玻璃 `glass`**。灯室玻璃使用 `{"type": "glass", "ior": 1.45}`。射线进入或离开玻璃时，程序根据入射角和界面两侧的折射率计算菲涅耳反射概率。每次命中按该概率选择反射或折射，折射方向遵循斯涅尔定律，发生全反射时只走反射方向。
 4. **自发光 `emissive`**。灯芯使用 `{"type": "emissive", "color": [9, 3.1, 0.65]}`。这里的 `color` 给出表面自身发出的光。路径击中正面就累加发光贡献，击中背面则贡献为零，两种情况都在这里终止。若希望积分器从其他表面直接向一块发光面采样，可在 `lights[]` 中定义 `area` 灯。
+5. **Principled BSDF `principled`**。例如 `{"type": "principled", "color": [0.8, 0.32, 0.12], "metallic": 0.7, "roughness": 0.35}`。金属度为 0 时，底色决定漫反射颜色，正视表面的镜面反射率为 4%。金属度为 1 时，只保留由底色着色的微表面反射。提高粗糙度会拓宽高光，使倒影更模糊。
 
 材质名负责把配置和网格连起来。例如，`forest.json` 中的 `objects[0].material` 引用 `"stone"`，加载器便将这份漫反射材质绑定到 `rock.obj` 的每个三角形上。[石头场景](scene/forest.json) · [观测站材质配置](scene/tidewatch.json) · [材质参数解析](src/materials/material_reader.cpp) · [散射实现](src/materials/material.cpp) · [发光命中处理](src/render/path_integrator.cpp)
 
@@ -301,3 +305,7 @@ docs/                    设计、素材来源与阶段记录
 ### A6：体积 Alpha 阴影
 
 从地面的受光点向点光源发出阴影射线，按射线在雾内的实际长度 `d` 计算透射率 `T = exp(−density × d)`。体积 Alpha 为 `1 − T`，地面接收的直接光乘以 `T`，因此同一位置的雾层越厚，阴影越深。
+
+### B1：Principled BSDF
+
+`metallic` 在带漫反射的非金属与有色金属反射之间插值。GGX 微表面反射使用 Schlick 菲涅耳和 Smith 遮蔽项，分布参数取 `max(roughness², 0.001)`。采样时在余弦加权的漫反射方向与 GGX 反射方向之间选择，用完整 BSDF 和混合 PDF 计算路径权重，并将同一 PDF 用于 MIS。

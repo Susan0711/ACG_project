@@ -6,9 +6,62 @@ namespace {
 double cosine_pdf(Vec3 normal, Vec3 direction) {
     return std::max(0.0, normal.dot(direction)) / pi;
 }
+
+Vec3 direction_about(Vec3 normal, double sine, double cosine, double azimuth) {
+    const Vec3 axis = std::abs(normal.x) > 0.9 ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+    const Vec3 tangent = axis.cross(normal).normalized();
+    const Vec3 bitangent = normal.cross(tangent);
+    return (tangent * (sine * std::cos(azimuth)) + bitangent * (sine * std::sin(azimuth))
+            + normal * cosine).normalized();
 }
 
-BSDFEvaluation evaluate_bsdf(const Material& material, const Ray&, const HitRecord& hit, Vec3 direction) {
+Vec3 sample_cosine(Vec3 normal, Sampler& rng) {
+    const double u = rng.next();
+    return direction_about(normal, std::sqrt(u), std::sqrt(1 - u), 2 * pi * rng.next());
+}
+
+double ggx_alpha(const Material& material) {
+    return std::max(0.001, material.roughness * material.roughness);
+}
+
+double specular_probability(const Material& material) {
+    return 0.5 + 0.5 * material.metallic;
+}
+
+BSDFEvaluation evaluate_principled(const Material& material, Vec3 view, const HitRecord& hit, Vec3 light) {
+    const Vec3 normal = hit.normal;
+    const Vec3 geometric = hit.front_face ? hit.outward_normal : hit.outward_normal * -1;
+    const double nv = normal.dot(view), nl = normal.dot(light);
+    if (nv <= 0 || nl <= 0 || geometric.dot(light) <= 0) return {};
+
+    const Vec3 half = (view + light).normalized();
+    const double nh = std::clamp(normal.dot(half), 0.0, 1.0);
+    const double vh = std::clamp(view.dot(half), 0.0, 1.0);
+    if (vh == 0) return {};
+    const double alpha = ggx_alpha(material), a2 = alpha * alpha;
+    const double denominator = (1 - nh) * (1 + nh) + a2 * nh * nh;
+    const double distribution = a2 / (pi * denominator * denominator);
+    // Height-correlated Smith masking/shadowing divided by 4 (n.v) (n.l).
+    const double visibility = 0.5 / (nl * std::sqrt(a2 + (1 - a2) * nv * nv)
+                                    + nv * std::sqrt(a2 + (1 - a2) * nl * nl));
+
+    const Vec3 base = material.albedo(hit.uv);
+    const double dielectric = 1 - material.metallic;
+    const Vec3 f0 = Vec3{0.04, 0.04, 0.04} * dielectric + base * material.metallic;
+    const double grazing = std::pow(1 - vh, 5);
+    const Vec3 fresnel_rgb = f0 + (Vec3{1, 1, 1} - f0) * grazing;
+    const Vec3 diffuse = base * (dielectric * 0.96 * (1 - grazing) / pi);
+    const double p_spec = specular_probability(material);
+    // Sampling GGX half vectors with density D(h) (n.h) induces this reflection PDF.
+    const double specular_pdf = distribution * nh / (4 * vh);
+    return {diffuse + fresnel_rgb * (distribution * visibility),
+            (1 - p_spec) * cosine_pdf(normal, light) + p_spec * specular_pdf};
+}
+}
+
+BSDFEvaluation evaluate_bsdf(const Material& material, const Ray& incident, const HitRecord& hit, Vec3 direction) {
+    if (material.kind == Kind::principled)
+        return evaluate_principled(material, incident.direction.normalized() * -1, hit, direction);
     if (!material.has_continuous_bsdf()) return {};
     double density = cosine_pdf(hit.normal, direction);
     if (density == 0) return {};
@@ -24,10 +77,23 @@ double fresnel(double c,double ei,double et) {
 BSDFSample sample_bsdf(const Material& m,const Ray& ray,const HitRecord& h,Sampler& rng) {
     Vec3 d=ray.direction.normalized(),n=h.normal;
     if(m.kind==Kind::diffuse) {
-        double u=rng.next(),phi=2*pi*rng.next();
-        Vec3 tangent=(std::abs(n.x)>0.9?Vec3{0,1,0}:Vec3{1,0,0}).cross(n).normalized(),bitangent=n.cross(tangent);
-        Vec3 wi=(tangent*(std::sqrt(u)*std::cos(phi))+bitangent*(std::sqrt(u)*std::sin(phi))+n*std::sqrt(1-u)).normalized();
+        Vec3 wi = sample_cosine(n, rng);
         return {wi,m.albedo(h.uv),cosine_pdf(n,wi),false};
+    }
+    if (m.kind == Kind::principled) {
+        Vec3 wi;
+        if (rng.next() < specular_probability(m)) {
+            const double u = rng.next();
+            const double slope = ggx_alpha(m) * std::sqrt(u / (1 - u));
+            const double cosine = 1 / std::sqrt(1 + slope * slope);
+            const Vec3 half = direction_about(n, slope * cosine, cosine, 2 * pi * rng.next());
+            wi = (d - half * (2 * d.dot(half))).normalized();
+        } else {
+            wi = sample_cosine(n, rng);
+        }
+        const auto bsdf = evaluate_principled(m, d * -1, h, wi);
+        if (bsdf.pdf <= 0) return {wi, {}, 0, false};
+        return {wi, bsdf.value * (n.dot(wi) / bsdf.pdf), bsdf.pdf, false};
     }
     Vec3 reflection=(d-n*(2*d.dot(n))).normalized();
     if(m.kind==Kind::mirror)return {reflection,m.color,1,true};

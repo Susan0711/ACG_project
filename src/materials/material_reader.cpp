@@ -1,11 +1,19 @@
 #include "materials/material_reader.h"
 #include "io/json_fields.h"
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
 namespace {
+double unit_parameter(const nlohmann::json& entry, const char* field, double fallback) {
+    const double value = json_fields::optional_number(entry, field, fallback);
+    if (!std::isfinite(value) || value < 0 || value > 1)
+        throw std::runtime_error(std::string(field) + " must be in [0, 1]");
+    return value;
+}
+
 std::shared_ptr<const Texture> read_texture(const nlohmann::json& entry, const char* field,
                                            const std::filesystem::path& directory, bool decode_srgb) {
     const auto file = std::filesystem::u8path(entry.at(field).get<std::string>());
@@ -28,13 +36,21 @@ Material read_material(const nlohmann::json& entry, const std::filesystem::path&
         material.kind = Kind::emissive;
         material.color = json_fields::rgb(entry, "color");
         return material;
-    } else if (type == "diffuse" || type == "mirror") {
-        material.kind = type == "diffuse" ? Kind::diffuse : Kind::mirror;
-        if (material.kind == Kind::diffuse && entry.contains("texture")) {
-            json_fields::expect_fields(entry, {"type", "texture", "opacity", "opacity_map"});
+    } else if (type == "diffuse" || type == "mirror" || type == "principled") {
+        const bool textured = type != "mirror" && entry.contains("texture");
+        const char* base_field = textured ? "texture" : "color";
+        if (type == "principled") {
+            json_fields::expect_fields(entry, {"type", base_field, "metallic", "roughness", "opacity", "opacity_map"});
+            material.kind = Kind::principled;
+            material.metallic = unit_parameter(entry, "metallic", material.metallic);
+            material.roughness = unit_parameter(entry, "roughness", material.roughness);
+        } else {
+            json_fields::expect_fields(entry, {"type", base_field, "opacity", "opacity_map"});
+            material.kind = type == "diffuse" ? Kind::diffuse : Kind::mirror;
+        }
+        if (textured) {
             material.texture = read_texture(entry, "texture", scene_directory, true);
         } else {
-            json_fields::expect_fields(entry, {"type", "color", "opacity", "opacity_map"});
             material.color = json_fields::rgb(entry, "color");
             const Vec3 c = material.color;
             if (std::max({c.x, c.y, c.z}) > 1) throw std::runtime_error("Reflectance color must be in [0, 1]");
